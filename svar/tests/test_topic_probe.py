@@ -389,7 +389,11 @@ def run_main(
     monkeypatch.setattr(topic_probe, "client", lambda service, region: clients[service])
     monkeypatch.setattr(topic_probe, "wait_until_ready", ready)
     monkeypatch.setattr(topic_probe, "deployed_environment", lambda region: environment or {})
-    return topic_probe.main(["--questions", str(path), "--answers", str(answers), *args])
+    # Ireland's, the one stack with a topic guardrail; a `--region` in ``args`` comes later and
+    # wins. Without it the run would take Frankfurt's topic model and a real client.
+    return topic_probe.main(
+        ["--questions", str(path), "--answers", str(answers), "--region", "eu-west-1", *args]
+    )
 
 
 def test_a_run_measures_every_question_as_input_and_every_answer_as_output(

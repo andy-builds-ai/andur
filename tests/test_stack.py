@@ -103,10 +103,31 @@ def deploy_context() -> dict[str, Any]:
     return json.loads(CDK_JSON.read_text(encoding="utf-8"))["context"]
 
 
+#: The region a test stack is built for when it names none: Ireland, the one region whose stack
+#: has CloudFront, the topic guardrail and the EU profile, which this module checks. Frankfurt's
+#: stack is checked in svar/tests/test_regions.py.
+TEST_REGION = "eu-west-1"
+
+#: Ireland's row of the model table, and its answer model with its prices there.
+IRELAND = answer_models.REGIONS[TEST_REGION]
+IRELAND_MODEL = answer_model(IRELAND.answer_model_id, TEST_REGION)
+
+
 def andur_stacks(app: cdk.App, construct_id: str, **settings: Any) -> tuple[TaugStack, SvarStack]:
-    """Taug's stack and Svar's, wired as infra/app.py wires them. Svar's gets ``construct_id``
-    and ``settings``, Taug's the id with "Taug" after it, and an ``env`` goes to both."""
-    taug = TaugStack(app, f"{construct_id}Taug", env=settings.get("env"))
+    """Taug's stack and Svar's, wired as infra/app.py wires them for the region of ``env``, or
+    for `TEST_REGION` without one; each setting not given comes from that region's table. Svar's
+    gets ``construct_id`` and ``settings``, Taug's the id with "Taug" after it, and the ``env``
+    goes to both."""
+    env = settings.setdefault("env", cdk.Environment(region=TEST_REGION))
+    models = answer_models.region_models(env.region)
+    settings = {
+        "answer_model_id": models.answer_model_id,
+        "topic_model_id": models.topic_model_id,
+        "answer_guardrail_profile": models.answer_guardrail_profile,
+        "behind_cloudfront": models.behind_cloudfront,
+        **settings,
+    }
+    taug = TaugStack(app, f"{construct_id}Taug", env=env)
     svar = SvarStack(app, construct_id, knowledge_base=taug.knowledge_base, **settings)
     svar.add_stack_dependency(taug, "Svar reads the knowledge base from Taug.")
     return taug, svar
@@ -703,7 +724,7 @@ def test_answer_function_is_configured_only_through_its_environment(
         "KNOWLEDGE_BASE_ID": imported(
             taug_stack, taug_template, taug_stack.knowledge_base, "KnowledgeBaseId"
         ),
-        "MODEL_ID": ANSWER_MODEL_ID,
+        "MODEL_ID": IRELAND.answer_model_id,
         "ANSWER_PROMPT": "sentence-first",
         "REGION": {"Ref": "AWS::Region"},
         "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
@@ -718,8 +739,8 @@ def test_answer_function_is_configured_only_through_its_environment(
         "EXCERPT_GUARDRAIL_VERSION": get_att(stack, stack.excerpt_guardrail_version, "Version"),
         "TOPIC_GUARDRAIL_ID": get_att(stack, stack.topic_guardrail_version, "GuardrailId"),
         "TOPIC_GUARDRAIL_VERSION": get_att(stack, stack.topic_guardrail_version, "Version"),
-        "PRICE_INPUT_PER_1K_TOKENS": PRICE_INPUT_PER_1K_TOKENS,
-        "PRICE_OUTPUT_PER_1K_TOKENS": PRICE_OUTPUT_PER_1K_TOKENS,
+        "PRICE_INPUT_PER_1K_TOKENS": IRELAND_MODEL.input_per_1k,
+        "PRICE_OUTPUT_PER_1K_TOKENS": IRELAND_MODEL.output_per_1k,
         "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
         "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
         "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
@@ -763,18 +784,18 @@ def test_answer_role_has_five_policies_on_named_resources(
         taug_stack, taug_template, taug_stack.knowledge_base, "KnowledgeBaseArn"
     )
 
-    # The default model is an EU profile: the profile needs the guardrail, the
+    # Ireland's model is an EU profile: the profile needs the guardrail, the
     # model behind it needs the profile.
     profile, model, apply_guardrail = policies["InvokeAnswerModel"]["Statement"]
     assert profile["Action"] == model["Action"] == "bedrock:InvokeModel"
-    assert joined_last_part(profile["Resource"]) == f":inference-profile/{ANSWER_MODEL_ID}"
+    assert joined_last_part(profile["Resource"]) == f":inference-profile/{IRELAND.answer_model_id}"
     assert model["Resource"] == {
         "Fn::Join": [
             "",
             [
                 "arn:",
                 {"Ref": "AWS::Partition"},
-                ":bedrock:eu-*::foundation-model/" + ANSWER_MODEL_ID.removeprefix("eu."),
+                ":bedrock:eu-*::foundation-model/" + IRELAND.answer_model_id.removeprefix("eu."),
             ],
         ]
     }
@@ -852,7 +873,11 @@ def test_the_default_model_carries_its_own_prices() -> None:
         row.input_per_1k,
         row.output_per_1k,
     )
-    assert (row.name, row.input_per_1k, row.output_per_1k) == ("Nova Pro", "0.00092", "0.00368")
+    assert (row.name, row.input_per_1k, row.output_per_1k) == (
+        "Qwen3 235B A22B 2507",
+        "0.00029",
+        "0.00116",
+    )
 
 
 def test_account_wide_names_carry_the_region(
@@ -1219,7 +1244,7 @@ def test_the_budget_table_is_one_item_per_key_hash(stack: SvarStack, template: T
     assert properties["AttributeDefinitions"] == [
         {"AttributeName": BUDGET_KEY_ATTRIBUTE, "AttributeType": "S"}
     ]
-    assert properties["Replicas"] == [{"Region": {"Ref": "AWS::Region"}}]
+    assert properties["Replicas"] == [{"Region": TEST_REGION}]
 
 
 def test_the_budget_table_is_billed_per_request(stack: SvarStack, template: Template) -> None:
@@ -1429,9 +1454,7 @@ def test_the_topic_probe_builds_the_topics_the_stack_deploys(
         "tierName": deployed["TopicsTierConfig"]["TierName"]
     }
     assert probe["crossRegionConfig"] == {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID}
-    assert properties["CrossRegionConfig"] == {
-        "GuardrailProfileArn": profile_arn({"Ref": "AWS::Region"})
-    }
+    assert properties["CrossRegionConfig"] == {"GuardrailProfileArn": profile_arn(TEST_REGION)}
     assert probe["blockedInputMessaging"] == properties["BlockedInputMessaging"]
     assert probe["blockedOutputsMessaging"] == properties["BlockedOutputsMessaging"]
     assert probe["name"] == "andur-topic-probe" != properties["Name"]
@@ -1453,14 +1476,12 @@ def test_the_grounding_probe_copies_the_answer_guardrail(
     topic, as the answer guardrail has none, its masking, its grounding thresholds, its profile
     and messages."""
     properties = resource_of(stack, template, stack.guardrail)["Properties"]
-    probe = grounding_probe.probe_request()
+    probe = grounding_probe.probe_request(TEST_REGION)
     assert "topicPolicyConfig" not in probe and "TopicPolicyConfig" not in properties
     for name in ("sensitiveInformationPolicyConfig", "contextualGroundingPolicyConfig"):
         assert pascal_case(probe[name]) == properties[name[0].upper() + name[1:]], name
     assert probe["crossRegionConfig"] == {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID}
-    assert properties["CrossRegionConfig"] == {
-        "GuardrailProfileArn": profile_arn({"Ref": "AWS::Region"})
-    }
+    assert properties["CrossRegionConfig"] == {"GuardrailProfileArn": profile_arn(TEST_REGION)}
     assert probe["blockedInputMessaging"] == properties["BlockedInputMessaging"]
     assert probe["blockedOutputsMessaging"] == properties["BlockedOutputsMessaging"]
     assert probe["name"] == "andur-grounding-probe" != properties["Name"]
@@ -1481,7 +1502,7 @@ def test_with_the_flag_on_the_grounding_probe_copies_the_question_topics_too(
     monkeypatch.setattr(grounding_probe, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
     _, other = andur_stacks(cdk.App(context=deploy_context()), "FirstDeployProbeStack")
     properties = resource_of(other, Template.from_stack(other), other.guardrail)["Properties"]
-    probe = grounding_probe.probe_request()
+    probe = grounding_probe.probe_request(TEST_REGION)
     topics = probe["topicPolicyConfig"]
     assert pascal_case(topics["topicsConfig"]) == properties["TopicPolicyConfig"]["TopicsConfig"]
     assert pascal_case(topics["tierConfig"]) == properties["TopicPolicyConfig"]["TopicsTierConfig"]
@@ -1516,7 +1537,7 @@ def test_denied_topics_run_in_the_standard_tier_through_the_eu_profile(
     assert properties["TopicPolicyConfig"]["TopicsTierConfig"] == {"TierName": "STANDARD"}
     for guardrail in (stack.topic_guardrail, stack.guardrail):
         assert resource_of(stack, template, guardrail)["Properties"]["CrossRegionConfig"] == {
-            "GuardrailProfileArn": profile_arn({"Ref": "AWS::Region"})
+            "GuardrailProfileArn": profile_arn(TEST_REGION)
         }
     excerpt = resource_of(stack, template, stack.excerpt_guardrail)["Properties"]
     assert "CrossRegionConfig" not in excerpt

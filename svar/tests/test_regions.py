@@ -96,8 +96,8 @@ def fallback() -> tuple[SvarStack, Template]:
 # --- The table -------------------------------------------------------------
 
 
-def test_ireland_stays_the_default_with_its_model_and_profile() -> None:
-    assert DEFAULT_REGION == "eu-west-1"
+def test_frankfurt_is_the_default_and_ireland_keeps_its_model_and_profile() -> None:
+    assert DEFAULT_REGION == "eu-central-1"
     ireland = REGIONS["eu-west-1"]
     assert ireland.answer_model_id == "eu.amazon.nova-pro-v1:0"
     assert (ireland.topic_model_id, ireland.answer_guardrail_profile) == (None, True)

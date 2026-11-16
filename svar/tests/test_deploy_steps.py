@@ -26,16 +26,18 @@ from aws_cdk.assertions import Template
 
 from svar.infra import answer_function, guardrails as stack_guardrails
 from svar.infra.answer_function import (
-    ANSWER_MODEL_ID,
     ANSWER_TIMEOUT_SECONDS,
     DEPLOY_DRAIN_SECONDS,
     EU_PROFILE_PREFIX,
 )
 from svar.infra.deploy_drain import handler as drain_handler
-from tests.test_stack import REGIONAL_MODEL_ID, andur_stacks, deploy_context
+from tests.test_stack import IRELAND, REGIONAL_MODEL_ID, TEST_REGION, andur_stacks, deploy_context
 
 ACCOUNT = "111122223333"
-REGION = "eu-west-1"
+#: Ireland's stack, the one region with three guardrails and the model behind the EU profile.
+REGION = TEST_REGION
+#: Ireland's answer model, an EU profile: the walk checks the profile's guardrail condition.
+ANSWER_MODEL_ID = IRELAND.answer_model_id
 
 #: The number of each guardrail version before the deploy, and of the one it makes.
 OLD, NEW = "3", "4"

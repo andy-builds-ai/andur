@@ -26,7 +26,7 @@ from taug.scripts.aws import TAUG_STACK_NAME  # noqa: E402
 
 app = cdk.App()
 
-#: `DEFAULT_REGION` (Ireland) unless `-c region=<region>` names another of `REGIONS`. Taken
+#: `DEFAULT_REGION` (Frankfurt) unless `-c region=<region>` names another of `REGIONS`. Taken
 #: from neither the caller's profile nor the shell, so a misconfigured shell cannot scatter
 #: half a deployment across two regions.
 REGION = app.node.try_get_context("region") or DEFAULT_REGION

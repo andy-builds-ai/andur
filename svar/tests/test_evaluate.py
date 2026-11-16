@@ -449,9 +449,10 @@ def test_the_results_are_written_after_every_model(
     settings = config.load_settings(ENVIRONMENT)
     monkeypatch.setattr(config, "load_settings", lambda environ: settings)
     monkeypatch.setattr(evaluate, "run_model", run_model)
-    assert evaluate.main(["--model", "Nova Pro", "--model", "Nova 2 Lite", "--out", str(out)]) == 0
-    assert written == [["Nova Pro"]]
-    assert list(json.loads(out.read_text(encoding="utf-8"))["runs"]) == ["Nova Pro", "Nova 2 Lite"]
+    assert evaluate.main(["--model", "Nova Pro", "--model", "Qwen3 32B", "--out", str(out)]) == 0
+    # In the order of the region's table, Frankfurt's.
+    assert written == [["Qwen3 32B"]]
+    assert list(json.loads(out.read_text(encoding="utf-8"))["runs"]) == ["Qwen3 32B", "Nova Pro"]
 
 
 def test_any_other_error_is_recorded_not_retried() -> None:
