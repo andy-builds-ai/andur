@@ -11,10 +11,11 @@ Five commands, all run from the repository root. What the scripts need (install,
 | `python -m svar.scripts.control_eval` | Asks 42 fixed questions of every model of `FRANKFURT_MODELS` the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
 
 Svar runs in `eu-central-1` (Frankfurt). `ask`, `evaluate`, `topic_probe` and
-`grounding_probe` take `--region` and without it aim at `eu-west-1` (Ireland),
-the code's default region, whose stack stands at older code and is not carried
-on ([docs/status.md](../../docs/status.md)); add `--region eu-central-1` to
-measure what runs. `control_eval` defaults to `eu-central-1`.
+`grounding_probe` take `--region` and without it aim at `eu-central-1`, the
+code's default region; `--region eu-west-1` aims at Ireland, whose stack stands
+at older code and is not carried on ([docs/status.md](../../docs/status.md)).
+The commands below that measure Ireland's topic guardrail, its five models or
+its grounding check name it. `control_eval` defaults to `eu-central-1` as well.
 
 ## ask — the proof that answering works
 
@@ -83,9 +84,9 @@ language and they are English.
 ## evaluate — which model answers best
 
 ```bash
-python -m svar.scripts.evaluate                              # all five models
-python -m svar.scripts.evaluate --model "Nova 2 Lite" --out results.json
-python -m svar.scripts.evaluate --model "Nova Pro" --questions svar/scripts/evaluation-questions-de.json
+python -m svar.scripts.evaluate --region eu-west-1                # all five models
+python -m svar.scripts.evaluate --region eu-west-1 --model "Nova 2 Lite" --out results.json
+python -m svar.scripts.evaluate --region eu-west-1 --model "Nova Pro" --questions svar/scripts/evaluation-questions-de.json
 ```
 
 It asks the 30 questions in `evaluation-questions.json` — 22 that the
@@ -192,8 +193,8 @@ paid for, and written after every model.
 ## topic_probe — what the denied topics refuse, before a deploy
 
 ```bash
-python -m svar.scripts.topic_probe --out probe.json             # DENIED_TOPICS as they are in the repository
-python -m svar.scripts.topic_probe --deployed --out probe.json  # the deployed topic guardrail
+python -m svar.scripts.topic_probe --region eu-west-1 --out probe.json             # DENIED_TOPICS as they are in the repository
+python -m svar.scripts.topic_probe --region eu-west-1 --deployed --out probe.json  # the deployed topic guardrail
 ```
 
 In a region whose stack checks the topics with a model, eu-central-1 with
@@ -369,7 +370,7 @@ in both languages — were refused in all of six runs after the frame.
 ## grounding_probe — what the grounding check withholds, in German too
 
 ```bash
-python -m svar.scripts.grounding_probe --out grounding.json
+python -m svar.scripts.grounding_probe --region eu-west-1 --out grounding.json
 ```
 
 The grounding check reads English, French and Spanish only, the user guide

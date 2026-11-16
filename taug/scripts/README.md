@@ -18,10 +18,10 @@ Three commands, all run from the repository root:
   `aws login` and rerun.
 - The deployed stacks. Bucket, knowledge base id, data source id and key path
   are read from the outputs of Taug's stack, `TaugStack`; web address and budget
-  table from those of Svar's, `AndurStack`. Without `--region` both in `eu-west-1`,
+  table from those of Svar's, `AndurStack`. Without `--region` both in `eu-central-1`,
   `DEFAULT_REGION` of `taug/infra/answer_models.py`, whatever region a shell profile names.
-  The stacks that run are in Frankfurt, so every command here takes
-  `--region eu-central-1`; Ireland's stack stands at older code, its `TaugStack`
+  The stacks that run are in Frankfurt, and every command here names
+  `--region eu-central-1` all the same; Ireland's stack stands at older code, its `TaugStack`
   holds none of these outputs, and it is not carried on
   ([docs/status.md](../../docs/status.md)). Each value can be passed by hand
   instead:

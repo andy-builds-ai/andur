@@ -149,6 +149,24 @@ of the function's code, which now can check the topics with a model. As of
 carry a `DEFAULT_REGION` of their own, `eu-central-1`, the rehearsal because it
 takes only a region whose function is its own address (`scripts/README.md`).
 
+<a name="2026-11-16-frankfurt-is-the-default"></a>
+**2026-11-16 — Frankfurt is the default region.** The operator decided. Svar
+runs in Frankfurt, and a company's documents stay in Germany; Ireland is the
+comparison stack, not carried on and to be deleted
+([status.md](status.md)). `DEFAULT_REGION` in `taug/infra/answer_models.py`
+is now `eu-central-1`, so `cdk` without `-c region=` and every script without
+`--region` aim at Frankfurt; Ireland takes `-c region=eu-west-1` and
+`--region eu-west-1`, and stays in `REGIONS` until its stack is deleted. This
+replaces *The region is a setting, Ireland stays the default*
+(2026-10-06). The switch was the one line that entry promised, but not only
+that: the tests that build a stack without a region now build Ireland's by
+name, so no test checks a stack that neither region deploys (Frankfurt's
+model, prices and grounding threshold with Ireland's topic guardrail and
+CloudFront), and CI synthesizes Ireland with `-c region=eu-west-1`. The
+commands in the documents keep naming `eu-central-1`, so a copied line holds
+whatever the default. Both templates of each region stayed byte for byte the
+same.
+
 <a name="2026-09-28-account-wide-names-carry-region"></a>
 **2026-09-28 — Names that hold for the whole account carry the region.**
 IAM role names and CloudFront policy and origin access control names are

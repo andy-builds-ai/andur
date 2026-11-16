@@ -12,18 +12,18 @@ means it with `-c region=eu-central-1` ([Another region](#another-region);
 what runs where: [status.md](status.md)). The one exception is the
 measurement of the topic guardrail, which only Ireland's stack has; it names
 `eu-west-1`. Without `-c region=`, which picks a region of
-`REGIONS` in `taug/infra/answer_models.py`, everything goes to `eu-west-1`
-(Ireland), the default region.
+`REGIONS` in `taug/infra/answer_models.py`, everything goes to `eu-central-1`
+(Frankfurt), the default region; Ireland only with `-c region=eu-west-1`.
 
 Ireland has not been moved. Taug's seven resources (the documents bucket and
 its policy, the vector bucket, the index, the knowledge base role, the
 knowledge base and its data source) are still in `AndurStack` there, and the
 stack is to be deleted later
-([decisions.md, 11.11.2026](decisions.md#2026-11-11-move-ran-in-frankfurt)). `DEFAULT_REGION` is `eu-west-1`, so `cdk deploy
---all` without `-c region=` aims at Ireland. Deployed from this code, CDK
+([decisions.md, 11.11.2026](decisions.md#2026-11-11-move-ran-in-frankfurt)). `cdk deploy
+--all -c region=eu-west-1` aims at Ireland. Deployed from this code, CDK
 would build the seven again in `TaugStack` and remove them from `AndurStack`.
 The build is expected to fail at the documents bucket's fixed name and roll
-back; that has not been tried. `cdk diff` without `-c region=` shows the
+back; that has not been tried. `cdk diff -c region=eu-west-1` shows the
 change first. Do not
 deploy Ireland from here without moving first
 ([Moving resources between stacks](#moving-resources-between-stacks)).

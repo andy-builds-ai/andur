@@ -294,9 +294,9 @@ How to set up the repository and run the checks, which need no AWS:
 [the overview](../README.md#build-and-test-it). Deploying needs AWS
 credentials as well.
 
-The commands below build both stacks in Frankfurt. Without
-`-c region=eu-central-1` and `--region eu-central-1` they aim at Ireland, the
-default region, whose stack stands at older code and is not to be deployed
+The commands below build both stacks in Frankfurt, the default region, and
+name it all the same. Ireland takes `-c region=eu-west-1` and
+`--region eu-west-1`; its stack stands at older code and is not to be deployed
 from here ([docs/status.md](../docs/status.md),
 [docs/operating.md](../docs/operating.md#deploy)).
 

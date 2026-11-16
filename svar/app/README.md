@@ -784,7 +784,7 @@ by then. A check of the question that fails is given back to the key, unless
 a timeout caused it or the verdict could not be read; a check of the answer
 that fails stays counted, the model has answered by then (*Keys are budgets*).
 
-Measured with `python -m svar.scripts.topic_probe` on 06.10.2026, three runs, the
+Measured with `python -m svar.scripts.topic_probe --region eu-west-1` on 06.10.2026, three runs, the
 probe guardrail built like the topic guardrail: 45 of 45 questions to refuse
 refused in every run, 1 of 87 harmless questions refused — "How much early
 payment discount can I deduct, and by when must I pay?" (`Tax returns`) —,

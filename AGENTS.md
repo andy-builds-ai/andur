@@ -67,16 +67,17 @@ templates, synthesize without a login, as CI does; then no account appears.
 ## Rules
 
 - **Only the operator deploys.** Never run `cdk deploy` or `cdk destroy`.
-- **Region is `eu-west-1` by default** (`DEFAULT_REGION` in
-  `taug/infra/answer_models.py`). `cdk synth -c region=eu-central-1` and each
-  script's `--region` pick Frankfurt. Frankfurt has its own models, checks
+- **Region is `eu-central-1` by default** (`DEFAULT_REGION` in
+  `taug/infra/answer_models.py`): Frankfurt, where Svar runs.
+  `cdk synth -c region=eu-west-1` and each script's `--region eu-west-1` pick
+  Ireland, whose stack stands at older code and is not carried on
+  (`docs/status.md`). Frankfurt has its own models, checks
   the denied topics with gpt-oss-120b in the region (`svar/app/topic_model.py`),
   keeps masking and grounding off the EU profile, and has no CloudFront: the
-  function's URL serves page and `/ask` (`svar/app/page.py`). Svar runs in
-  Frankfurt; Ireland's stack stands at older code and is not carried on
-  (`docs/status.md`), so a command against the running stacks names
-  `eu-central-1`. `cdk diff` compares both stacks without `--all`, which it
-  does not know.
+  function's URL serves page and `/ask` (`svar/app/page.py`). A command
+  against the running stacks still names `eu-central-1`, so a copied line
+  holds whatever the default. `cdk diff` compares both stacks without
+  `--all`, which it does not know.
 - **Use EU inference profiles, never a global one.**
 - **Model IDs and prices live only in `taug/infra/answer_models.py`.** Add a model
   there first; do not copy an ID or a price anywhere else.
@@ -120,9 +121,9 @@ date given.
 | `python -m svar.scripts.evaluate` | real models on AWS | real money, no figure given | |
 | `python -m taug.scripts.ingest`, `taug.scripts.retrieve`, `taug.scripts.workspace`, `svar.scripts.ask` | the deployed stacks; see `taug/scripts/README.md` and `svar/scripts/README.md` | | |
 | `python -m taug.scripts.workspace remove --yes` | deletes a workspace's key, budget and documents: never without the operator's word | | |
-| `python -m svar.scripts.topic_probe` | creates and deletes a guardrail named `andur-topic-probe` | 0.113 USD a run on 10.11.2026 | `DENIED_TOPICS` |
+| `python -m svar.scripts.topic_probe --region eu-west-1` | creates and deletes a guardrail named `andur-topic-probe` | 0.113 USD a run on 10.11.2026 | `DENIED_TOPICS` |
 | `python -m svar.scripts.topic_probe --region eu-central-1` | measures the Frankfurt topic check | three runs of 319 checks, 0.30 USD on 07.10.2026, 0.302 USD on 10.11.2026 | that prompt, and `check_topics_with_model` in `svar/app/topic_check.py` |
-| `python -m svar.scripts.grounding_probe` | creates and deletes a guardrail named `andur-grounding-probe` | 0.22 USD a run on 06.10.2026 | the grounding check or the prompt |
+| `python -m svar.scripts.grounding_probe --region eu-west-1` | creates and deletes a guardrail named `andur-grounding-probe` | 0.22 USD a run on 06.10.2026 | the grounding check or the prompt |
 | `python -m svar.scripts.control_eval` | creates and deletes up to three guardrails named `andur-control-*-probe` in eu-central-1 | 42 questions: 0.063 to 0.086 USD per Frankfurt model, 0.11 USD for Nova Pro, 0.33 USD for Claude Sonnet 4.6 on 06.10.2026 | |
 | `python -m vard.scripts.tool_probe` | models of `FRANKFURT_MODELS` | fractions of a cent per model | |
 | `python -m scripts.rehearsal` | sets up a workspace with its key on the deployed stacks and runs the measurements above against it; `--list` calls nothing | 0.70 USD on 07.10.2026 (at most 0.75) | |

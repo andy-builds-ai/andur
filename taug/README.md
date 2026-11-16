@@ -50,6 +50,6 @@ python -m taug.scripts.workspace --region eu-central-1 add quillmoor > /dev/null
 ```
 
 All of them call the deployed stacks except `ingest --check`. Without
-`--region` they aim at Ireland, the default region, whose stack is not carried
-on ([docs/status.md](../docs/status.md)). Options, output and exit codes:
+`--region` they aim at Frankfurt, the default region; `--region eu-west-1` aims
+at Ireland, whose stack is not carried on ([docs/status.md](../docs/status.md)). Options, output and exit codes:
 [scripts/README.md](scripts/README.md).
