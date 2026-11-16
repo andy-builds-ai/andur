@@ -411,11 +411,9 @@ def run_add(args: argparse.Namespace, settings: Mapping[str, str], connect: Any)
 
 def command(args: argparse.Namespace, *words: str) -> str:
     """This script's command line with ``words``, for the stack this run works on: the region
-    and the stack name go in when they are not the defaults. A command copied from a message
-    without them would add, change or delete in the default region's stack."""
-    options: list[str] = []
-    if args.region != REGION:
-        options += ["--region", args.region]
+    always goes in, so a copied line does not depend on the default; the stack names go in
+    when they are not the defaults."""
+    options: list[str] = ["--region", args.region]
     if args.stack_name != TAUG_STACK_NAME:
         options += ["--stack-name", args.stack_name]
     if args.svar_stack_name != SVAR_STACK_NAME:

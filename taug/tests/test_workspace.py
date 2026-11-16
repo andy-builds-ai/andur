@@ -461,7 +461,7 @@ def test_a_plan_that_does_not_get_through_still_prints_the_key_and_says_what_to_
 
     assert out == account.ssm.parameters[f"{PATH}/new-firm"]["Value"] + "\n"
     assert "the key is stored, its plan is not" in err
-    assert "python -m taug.scripts.workspace plan new-firm firma" in err
+    assert "python -m taug.scripts.workspace --region eu-central-1 plan new-firm firma" in err
     assert "default budget" in err
 
 
@@ -773,7 +773,10 @@ def test_the_window_is_named_also_when_the_ingestion_job_cannot_start(
 @pytest.mark.parametrize(
     ("options", "printed"),
     [
-        ((), f"python -m taug.scripts.workspace remove {TARGET} --yes"),
+        (
+            (),
+            f"python -m taug.scripts.workspace --region eu-central-1 remove {TARGET} --yes",
+        ),
         (
             ("--region", "eu-west-1"),
             f"python -m taug.scripts.workspace --region eu-west-1 remove {TARGET} --yes",
@@ -790,7 +793,8 @@ def test_the_command_to_run_again_names_the_stack_this_run_worked_on(
     options: tuple[str, ...], printed: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Copied without its region, the command would delete the key, the budget and the
-    documents of the same name in the default region's stack."""
+    documents of the same name in the default region's stack. The region is in the command
+    even for the default, because the default can change."""
     assert run(Account(), *options, "remove", TARGET, "--yes") == 0
     assert f"Run `{printed}` again" in capsys.readouterr().out
     again = workspace.parse_args(printed.split()[3:])
