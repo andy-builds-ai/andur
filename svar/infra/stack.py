@@ -75,7 +75,8 @@ class SvarStack(Stack):
         through the profile too; the excerpt guardrail never does. ``behind_cloudfront`` False:
         no CloudFront, no site bucket; the function's URL is open and serves the page too."""
         super().__init__(scope, construct_id, **kwargs)
-        # Without a set region (the tests) the prices are the default region's.
+        # Without a set region the prices are the default region's; infra/app.py and the tests
+        # always set one.
         self.price_region = DEFAULT_REGION if Token.is_unresolved(self.region) else self.region
         self.models = region_models(self.price_region)
         self.answer_model_id = answer_model_id

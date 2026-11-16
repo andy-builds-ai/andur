@@ -347,7 +347,9 @@ def run_main(
     monkeypatch.setattr(
         grounding_probe.topic_probe, "wait_until_ready", lambda b, g, sleep=None, name="": None
     )
-    return grounding_probe.main(["--answers", str(path), *args])
+    # Ireland's, as `ENVIRONMENT` is: the probe guardrail through the EU profile, at 0.7. A
+    # `--region` in ``args`` comes later and wins.
+    return grounding_probe.main(["--answers", str(path), "--region", "eu-west-1", *args])
 
 
 def test_a_run_checks_every_answer_and_only_a_withheld_german_one_in_english(
@@ -359,7 +361,7 @@ def test_a_run_checks_every_answer_and_only_a_withheld_german_one_in_english(
     assert bedrock.names() == ["list_guardrails", "create_guardrail", "get_guardrail"] + [
         "delete_guardrail"
     ]
-    assert bedrock.calls[1][1] == grounding_probe.probe_request()
+    assert bedrock.calls[1][1] == grounding_probe.probe_request("eu-west-1")
     assert bedrock.guardrails == {}
     # Every check on the probe's draft, with the workspace's passages only.
     assert {

@@ -60,7 +60,7 @@ svar = SvarStack(
     # the active AWS profile (`--profile`). Run without the CLI, the account
     # stays None: the stack still synthesises, bound to the region, but cannot
     # be deployed. The tests do not come through this file — they build their
-    # own stacks without an environment.
+    # own stacks, each with a region and no account (tests/test_stack.py).
     env=ENVIRONMENT,
 )
 svar.add_stack_dependency(taug, "Svar reads the knowledge base from Taug.")
