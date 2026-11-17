@@ -36,6 +36,7 @@ jobs:
       - run: pytest -q
 
       # Both regions build from the same code, with the CLI version the README names:
-      # Frankfurt as the default, Ireland by name. `synth` calls nothing in AWS.
+      # Frankfurt as the default, Ireland by name. `synth` calls no account, and the CLI's
+      # telemetry is off ("cli-telemetry": false in cdk.json).
       - run: npx --yes aws-cdk@2.1146.0 synth --quiet --no-notices
       - run: npx --yes aws-cdk@2.1146.0 synth --quiet --no-notices -c region=eu-west-1

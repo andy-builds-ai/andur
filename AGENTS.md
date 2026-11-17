@@ -34,8 +34,8 @@ head says how to renew it.
 ## Checks
 
 Run all three before you finish. CI (`.github/workflows/ci.yml`) runs the
-same, and then `cdk synth` for both regions. They need no AWS; the tests took
-about a minute.
+same, and then `cdk synth` for both regions. The three need no AWS; the tests
+took about a minute.
 
 ```bash
 ruff check
@@ -46,9 +46,15 @@ pytest -q
 ## The stacks
 
 ```bash
-cdk synth                         # builds both templates, no AWS call
+cdk synth                         # builds both templates, no call to the account
 cdk diff -c region=eu-central-1   # compares both with the running stacks; needs an AWS login, changes nothing
 ```
+
+The CDK CLI sends usage data to AWS (its telemetry, in us-east-1) unless it
+is turned off; `"cli-telemetry": false` in `cdk.json` turns it off for every
+`cdk` command run in this repository
+([CDK guide](https://docs.aws.amazon.com/cdk/v2/guide/cli-telemetry.html)).
+Leave it there.
 
 `infra/app.py` builds two stacks in one account and region: `TaugStack`
 (`taug/infra/stack.py`) and Svar's, class `SvarStack` in `svar/infra/stack.py`,

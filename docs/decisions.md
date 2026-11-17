@@ -183,6 +183,23 @@ the test of a region without a table either with made-up settings or with a
 helper that refuses the region before the stack does. Both templates of each
 region stayed byte for byte the same.
 
+<a name="2026-11-17-cdk-telemetry-off"></a>
+**2026-11-17 — The CDK CLI's telemetry is off in `cdk.json`.** The operator
+decided. Since 2.1100.0 the CLI sends usage data by default to
+`cdk-cli-telemetry.us-east-1.api.aws`: the region, the command and its
+parameters, context values, the operating system
+([CDK guide](https://docs.aws.amazon.com/cdk/v2/guide/cli-telemetry.html)).
+"`synth` calls nothing in AWS" held for the account, not for that.
+`"cli-telemetry": false` in the context of `cdk.json` turns it off for every
+`cdk` command run here, CI and deploys alike; the CLI 2.1146.0 reads it from
+there (`cdk cli-telemetry --status` → "CLI Telemetry is disabled" without
+`CDK_DISABLE_CLI_TELEMETRY`, 17.11.2026). The other ways were the variable in
+CI only, which leaves the operator's own commands sending, and only naming it
+in the text. `--no-version-reporting` would turn it off as well, but also the
+`CDKMetadata` the templates carry. The tests read the same context
+(`deploy_context` in `tests/test_stack.py`); both templates of each region
+stayed byte for byte the same.
+
 <a name="2026-09-28-account-wide-names-carry-region"></a>
 **2026-09-28 — Names that hold for the whole account carry the region.**
 IAM role names and CloudFront policy and origin access control names are
