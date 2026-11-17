@@ -340,7 +340,10 @@ def main(argv: list[str] | None = None) -> int:
     models = [m for m in known if not args.model or m.name in args.model]
     unknown = set(args.model or []) - {m.name for m in known}
     if unknown or not models:
-        print(f"error: unknown model {sorted(unknown)}; known: {[m.name for m in known]}")
+        print(
+            f"error: unknown model {sorted(unknown)}; known: {[m.name for m in known]}",
+            file=sys.stderr,
+        )
         return 2
     outside = [m.model_id for m in models if not stays_in_the_eu(m.model_id)]
     if outside:

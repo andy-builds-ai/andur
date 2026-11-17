@@ -115,7 +115,8 @@ IRELAND_MODEL = answer_model(IRELAND.answer_model_id, TEST_REGION)
 
 def andur_stacks(app: cdk.App, construct_id: str, **settings: Any) -> tuple[TaugStack, SvarStack]:
     """Taug's stack and Svar's, wired as infra/app.py wires them for the region of ``env``, or
-    for `TEST_REGION` without one. Each setting not given, Svar's stack takes from that
+    for `TEST_REGION` without an ``env``; an ``env`` without a region leaves it open, and Svar's
+    stack then counts as `DEFAULT_REGION`'s. Each setting not given, Svar's stack takes from that
     region's table itself, and it refuses a region without one. Svar's gets ``construct_id``
     and ``settings``, Taug's the id with "Taug" after it, and the ``env`` goes to both."""
     env = settings.setdefault("env", cdk.Environment(region=TEST_REGION))

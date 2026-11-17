@@ -180,7 +180,9 @@ def test_the_models_to_choose_from_are_those_of_the_region(
     only_there = {m.name for m in REGIONS[other].models} - {m.name for m in REGIONS[region].models}
     name = sorted(only_there)[0]
     assert evaluate.main(["--region", region, "--model", name]) == 2
-    assert f"unknown model ['{name}']" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert captured.err.startswith(f"error: unknown model ['{name}']")
+    assert captured.out == ""
 
 
 def body(answer: str, action: str = "none", cited: tuple[str, ...] = ()) -> dict[str, Any]:
