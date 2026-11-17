@@ -24,7 +24,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from svar.infra.answer_prompts import prompt_of
-from taug.infra.answer_models import ANSWER_MODELS, PRICE_DATE, AnswerModel, region_models
+from taug.infra.answer_models import AnswerModel, region_models
 from taug.scripts import utf8_output
 from taug.scripts.aws import REGION, AwsProblem, client, explained
 from taug.scripts.layout import document_of
@@ -45,9 +45,6 @@ LANGUAGES = ("en", "de")
 
 #: Only a model in the region or an EU profile keeps the data in the EU.
 ALLOWED_PROFILE_PREFIXES = ("eu.",)
-
-
-MODELS = ANSWER_MODELS
 
 #: A question the function still answers with "busy" is asked again after these
 #: pauses, in seconds — on top of the function's own second model call.
@@ -149,7 +146,7 @@ def score(question: Mapping[str, Any], body: Mapping[str, Any], app: Any) -> dic
     return {"correct": correct, "cites_document": cites}
 
 
-def settings_for(base: Any, model: AnswerModel, price_date: str = PRICE_DATE) -> Any:
+def settings_for(base: Any, model: AnswerModel, price_date: str) -> Any:
     """The deployed settings with this model, its token prices read on ``price_date`` and the
     wording of the system prompt it answers with (svar/infra/answer_prompts.py)."""
     prices = dataclasses.replace(
@@ -313,7 +310,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         description="Compare answer models on the evaluation questions, the way Svar answers.",
     )
     parser.add_argument(
-        "--model", action="append", help="a model name from MODELS; default: all of them"
+        "--model",
+        action="append",
+        help=(
+            "a model name from the table of --region in taug/infra/answer_models.py; "
+            "default: all of them"
+        ),
     )
     parser.add_argument("--questions", type=Path, default=QUESTIONS_FILE)
     parser.add_argument("--out", type=Path, help="write every answer and score as JSON here")

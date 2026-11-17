@@ -974,18 +974,18 @@ from files.
 | `TOPIC_MODEL_ID` | Instead of the two above, in a region whose stack checks the topics with a model (`REGIONS` in `taug/infra/answer_models.py`): `openai.gpt-oss-120b-1:0` in eu-central-1 since 07.10.2026. |
 | `PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS` | With `TOPIC_MODEL_ID`: USD per 1,000 input tokens of the topic model. |
 | `PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS` | With `TOPIC_MODEL_ID`: USD per 1,000 output tokens. |
-| `PRICE_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the answering model, `0.00092`. |
-| `PRICE_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens, `0.00368`. |
+| `PRICE_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the answering model, `0.00029`. |
+| `PRICE_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens, `0.00116`. |
 | `PRICE_TOPIC_PER_1K_UNITS` | USD per 1,000 text units of the topic filter, `0.15`. |
 | `PRICE_PII_PER_1K_UNITS` | USD per 1,000 text units of the sensitive information filter, `0.10`. |
 | `PRICE_GROUNDING_PER_1K_UNITS` | USD per 1,000 text units of the grounding check, `0.10`. |
-| `PRICE_DATE` | The day those prices were read, `2026-09-28`, as `YYYY-MM-DD`. |
+| `PRICE_DATE` | The day those prices were read, `2026-10-06`, as `YYYY-MM-DD`. |
 
-The values shown are those of the stack in eu-west-1, with Nova Pro; the
-stack in eu-central-1 gets Qwen3 235B's from the same table, read 06.10.2026.
-The prices are the standard-tier prices of Amazon Bedrock, read
-28.09.2026 from the AWS Price List API, the source of the pricing page; the
-source is in a comment next to them in the stack. The token prices come
+The values shown are those of the stack in eu-central-1, the default region,
+with Qwen3 235B; the stack in eu-west-1 gets Nova Pro's from the same table,
+read 28.09.2026. The prices are the standard-tier prices of Amazon Bedrock,
+read 06.10.2026 from the AWS Price List API, the source of the pricing page;
+the source is in a comment next to them in `taug/infra/answer_models.py`. The token prices come
 from `taug/infra/answer_models.py`, looked up by the model id the stack deploys,
 so a model never goes out with another model's prices, and a model without
 a row there does not synthesise. The guardrail prices are the same as in

@@ -91,7 +91,8 @@ python -m svar.scripts.evaluate --region eu-west-1 --model "Nova Pro" --question
 
 It asks the 30 questions in `evaluation-questions.json` — 22 that the
 documents answer, 4 that the guardrail must refuse, 4 that no document
-answers — of every model in `MODELS`, through `answer_question` in
+answers — of every model in the table of `--region` (`REGIONS` in
+`taug/infra/answer_models.py`), through `answer_question` in
 `svar/app/answering.py` with the deployed function's own settings. Only the model,
 its token prices and the wording of its system prompt (`prompt_of` in
 `svar/infra/answer_prompts.py`, the function's `ANSWER_PROMPT`) change, so a run
