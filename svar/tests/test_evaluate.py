@@ -167,10 +167,15 @@ def test_the_function_is_the_stacks_own() -> None:
 
 @pytest.mark.parametrize("region", sorted(REGIONS))
 def test_the_models_to_choose_from_are_those_of_the_region(
-    region: str, capsys: pytest.CaptureFixture[str]
+    region: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """``--model`` takes a name from the table of ``--region`` and refuses one from another
     region's table, before any AWS call."""
+
+    def paid(_region: str) -> dict[str, str]:
+        raise AssertionError("the run reached AWS")
+
+    monkeypatch.setattr(evaluate, "deployed_environment", paid)
     other = next(r for r in REGIONS if r != region)
     only_there = {m.name for m in REGIONS[other].models} - {m.name for m in REGIONS[region].models}
     name = sorted(only_there)[0]
