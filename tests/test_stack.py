@@ -115,20 +115,10 @@ IRELAND_MODEL = answer_model(IRELAND.answer_model_id, TEST_REGION)
 
 def andur_stacks(app: cdk.App, construct_id: str, **settings: Any) -> tuple[TaugStack, SvarStack]:
     """Taug's stack and Svar's, wired as infra/app.py wires them for the region of ``env``, or
-    for `TEST_REGION` without one; each setting not given comes from that region's table. A
-    region without a table gets none, so the stack itself refuses it. Svar's gets
-    ``construct_id`` and ``settings``, Taug's the id with "Taug" after it, and the ``env`` goes
-    to both."""
+    for `TEST_REGION` without one. Each setting not given, Svar's stack takes from that
+    region's table itself, and it refuses a region without one. Svar's gets ``construct_id``
+    and ``settings``, Taug's the id with "Taug" after it, and the ``env`` goes to both."""
     env = settings.setdefault("env", cdk.Environment(region=TEST_REGION))
-    models = answer_models.REGIONS.get(env.region)
-    if models is not None:
-        settings = {
-            "answer_model_id": models.answer_model_id,
-            "topic_model_id": models.topic_model_id,
-            "answer_guardrail_profile": models.answer_guardrail_profile,
-            "behind_cloudfront": models.behind_cloudfront,
-            **settings,
-        }
     taug = TaugStack(app, f"{construct_id}Taug", env=env)
     svar = SvarStack(app, construct_id, knowledge_base=taug.knowledge_base, **settings)
     svar.add_stack_dependency(taug, "Svar reads the knowledge base from Taug.")

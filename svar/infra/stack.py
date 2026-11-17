@@ -2,6 +2,8 @@
 
 Taug's stack (taug/infra/stack.py) holds what it stands on."""
 
+from enum import Enum
+
 from aws_cdk import (
     CfnOutput,
     Stack,
@@ -18,7 +20,6 @@ from svar.app.page import ASK_PATH
 from svar.infra.answer_function import (
     ANSWER_FUNCTION_NAME,
     ANSWER_MAX_CONCURRENCY,
-    ANSWER_MODEL_ID,
     create_answer_function,
     create_answer_role,
     create_budget_table,
@@ -50,6 +51,19 @@ from taug.infra.shared import create_log_group
 SVAR_DESCRIPTION = "Svar: guardrails, answer function and page, on Taug's knowledge base."
 
 
+class FromRegion(Enum):
+    """A setting of `SvarStack` that is not given: the stack takes it from its region's row of
+    `REGIONS` (taug/infra/answer_models.py).
+
+    A marker of its own, since None is a value of ``topic_model_id``."""
+
+    TABLE = "the region's table"
+
+
+#: The default of every setting `SvarStack` takes from its region's table.
+FROM_TABLE = FromRegion.TABLE
+
+
 class SvarStack(Stack):
     """Svar: the answer function with its guardrails, budgets and page. Deployed under the
     stack name it always had, AndurStack (infra/app.py)."""
@@ -60,25 +74,37 @@ class SvarStack(Stack):
         construct_id: str,
         *,
         knowledge_base: bedrock.CfnKnowledgeBase,
-        answer_model_id: str = ANSWER_MODEL_ID,
-        topic_model_id: str | None = None,
-        answer_guardrail_profile: bool = True,
+        answer_model_id: str | FromRegion = FROM_TABLE,
+        topic_model_id: str | None | FromRegion = FROM_TABLE,
+        answer_guardrail_profile: bool | FromRegion = FROM_TABLE,
         answer_max_concurrency: int | None = ANSWER_MAX_CONCURRENCY,
-        behind_cloudfront: bool = True,
+        behind_cloudfront: bool | FromRegion = FROM_TABLE,
         **kwargs,
     ) -> None:
         """``knowledge_base``: Taug's (taug/infra/stack.py), which the function searches;
         CDK passes its id and ARN between the stacks as an export and an import.
-        ``topic_model_id`` None: the topic guardrail checks the denied topics, through the
-        EU guardrail profile. A model id: that model checks them in the stack's region, and there
-        is no topic guardrail. ``answer_guardrail_profile``: whether the answer guardrail runs
-        through the profile too; the excerpt guardrail never does. ``behind_cloudfront`` False:
-        no CloudFront, no site bucket; the function's URL is open and serves the page too."""
+        ``answer_model_id``, ``topic_model_id``, ``answer_guardrail_profile`` and
+        ``behind_cloudfront`` not given: the stack's region's row of `REGIONS`, so a stack
+        without them is the one infra/app.py builds for that region; a region without a row
+        is refused. ``topic_model_id`` None: the topic guardrail checks the denied topics,
+        through the EU guardrail profile. A model id: that model checks them in the stack's
+        region, and there is no topic guardrail. ``answer_guardrail_profile``: whether the
+        answer guardrail runs through the profile too; the excerpt guardrail never does.
+        ``behind_cloudfront`` False: no CloudFront, no site bucket; the function's URL is open
+        and serves the page too."""
         super().__init__(scope, construct_id, **kwargs)
-        # Without a set region the prices are the default region's; infra/app.py and the tests
-        # always set one.
+        # Without a set region the table, and with it the prices, are the default region's;
+        # infra/app.py always sets one.
         self.price_region = DEFAULT_REGION if Token.is_unresolved(self.region) else self.region
         self.models = region_models(self.price_region)
+        if isinstance(answer_model_id, FromRegion):
+            answer_model_id = self.models.answer_model_id
+        if isinstance(topic_model_id, FromRegion):
+            topic_model_id = self.models.topic_model_id
+        if isinstance(answer_guardrail_profile, FromRegion):
+            answer_guardrail_profile = self.models.answer_guardrail_profile
+        if isinstance(behind_cloudfront, FromRegion):
+            behind_cloudfront = self.models.behind_cloudfront
         self.answer_model_id = answer_model_id
         self.answer_model = answer_model(answer_model_id, self.price_region)
         self.topic_model_id = topic_model_id

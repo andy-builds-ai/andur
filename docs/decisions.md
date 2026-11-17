@@ -167,6 +167,22 @@ commands in the documents keep naming `eu-central-1`, so a copied line holds
 whatever the default. Both templates of each region stayed byte for byte the
 same.
 
+<a name="2026-11-17-stack-settings-from-its-region"></a>
+**2026-11-17 — `SvarStack` takes its settings from its region's table.**
+Its four region settings (answer model, topic model, whether the answer
+guardrail uses the EU profile, CloudFront) defaulted to Frankfurt's model
+and Ireland's form for the rest, a stack no region deploys; built without a
+region, that is what it was. Now each one not given comes from the row of
+`REGIONS` for the stack's region, or for `DEFAULT_REGION` when no region is
+set, and a region without a row is still refused by the stack itself.
+`infra/app.py` and the test helpers no longer copy the table into the stack.
+A setting can still be given on purpose, as the Frankfurt fallback with the
+topic guardrail does; a model without a price in the region is refused as
+before. The other way, making the four settings compulsory, would have left
+the test of a region without a table either with made-up settings or with a
+helper that refuses the region before the stack does. Both templates of each
+region stayed byte for byte the same.
+
 <a name="2026-09-28-account-wide-names-carry-region"></a>
 **2026-09-28 — Names that hold for the whole account carry the region.**
 IAM role names and CloudFront policy and origin access control names are

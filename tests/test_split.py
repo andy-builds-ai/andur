@@ -15,7 +15,6 @@ import pytest
 from aws_cdk.assertions import Template
 
 from svar.scripts.ask import SVAR_STACK_NAME
-from taug.infra.answer_models import region_models
 from taug.infra.shared import REPOSITORY_ROOT
 from taug.scripts.aws import TAUG_STACK_NAME
 from tests.test_stack import andur_stacks, deploy_context
@@ -123,15 +122,8 @@ def region(request: pytest.FixtureRequest) -> str:
 def templates(region: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """Taug's and Svar's templates for ``region``, as infra/app.py builds them: Svar's stack
     under the name AndurStack, the logical ids of its CloudFront permissions carry it."""
-    models = region_models(region)
     taug, svar = andur_stacks(
-        cdk.App(context=deploy_context()),
-        "AndurStack",
-        env=cdk.Environment(region=region),
-        answer_model_id=models.answer_model_id,
-        topic_model_id=models.topic_model_id,
-        answer_guardrail_profile=models.answer_guardrail_profile,
-        behind_cloudfront=models.behind_cloudfront,
+        cdk.App(context=deploy_context()), "AndurStack", env=cdk.Environment(region=region)
     )
     return Template.from_stack(taug).to_json(), Template.from_stack(svar).to_json()
 

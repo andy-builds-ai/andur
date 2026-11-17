@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from svar.infra.answer_function import ANSWER_MAX_CONCURRENCY  # noqa: E402
 from svar.infra.stack import SVAR_DESCRIPTION, SvarStack  # noqa: E402
 from svar.scripts.ask import SVAR_STACK_NAME  # noqa: E402
-from taug.infra.answer_models import DEFAULT_REGION, region_models  # noqa: E402
+from taug.infra.answer_models import DEFAULT_REGION  # noqa: E402
 from taug.infra.stack import TAUG_DESCRIPTION, TaugStack  # noqa: E402
 from taug.scripts.aws import TAUG_STACK_NAME  # noqa: E402
 
@@ -30,7 +30,6 @@ app = cdk.App()
 #: from neither the caller's profile nor the shell, so a misconfigured shell cannot scatter
 #: half a deployment across two regions.
 REGION = app.node.try_get_context("region") or DEFAULT_REGION
-MODELS = region_models(REGION)
 
 #: `ANSWER_MAX_CONCURRENCY` unless `-c answer_max_concurrency=none` leaves the reservation out,
 #: for an account whose concurrency limit has no room for it.
@@ -45,16 +44,14 @@ ENVIRONMENT = cdk.Environment(account=os.environ.get("CDK_DEFAULT_ACCOUNT"), reg
 taug = TaugStack(app, TAUG_STACK_NAME, description=TAUG_DESCRIPTION, env=ENVIRONMENT)
 
 # Svar keeps the stack name it was deployed under, so its function, address and page stay
-# where they are; Taug's parts move out of it into TaugStack (docs/decisions.md).
+# where they are; Taug's parts move out of it into TaugStack (docs/decisions.md). Its models,
+# guardrails and address come from REGION's row of the model table; the stack refuses a
+# region without one.
 svar = SvarStack(
     app,
     SVAR_STACK_NAME,
     description=SVAR_DESCRIPTION,
     knowledge_base=taug.knowledge_base,
-    answer_model_id=MODELS.answer_model_id,
-    topic_model_id=MODELS.topic_model_id,
-    answer_guardrail_profile=MODELS.answer_guardrail_profile,
-    behind_cloudfront=MODELS.behind_cloudfront,
     answer_max_concurrency=None if CONCURRENCY == "none" else ANSWER_MAX_CONCURRENCY,
     # The account comes from outside: the CDK CLI sets CDK_DEFAULT_ACCOUNT from
     # the active AWS profile (`--profile`). Run without the CLI, the account

@@ -64,19 +64,11 @@ def profile_arn(region: str) -> dict[str, object]:
 
 def stack_in(region: str, **overrides: object) -> SvarStack:
     """The stack as infra/app.py builds it for ``region``, with ``overrides`` on top."""
-    models = region_models(region)
-    settings = {
-        "answer_model_id": models.answer_model_id,
-        "topic_model_id": models.topic_model_id,
-        "answer_guardrail_profile": models.answer_guardrail_profile,
-        "behind_cloudfront": models.behind_cloudfront,
-        **overrides,
-    }
     return andur_stacks(
         cdk.App(context=deploy_context()),
         f"Stack{region.replace('-', '')}{len(overrides)}",
         env=cdk.Environment(account=ACCOUNT, region=region),
-        **settings,
+        **overrides,
     )[1]
 
 
@@ -152,6 +144,30 @@ def test_a_region_without_a_table_is_refused() -> None:
         region_models("us-east-1")
     with pytest.raises(KeyError, match="has no price for eu-central-1"):
         answer_model("eu.amazon.nova-2-lite-v1:0", "eu-central-1")
+
+
+def test_a_stack_without_a_region_is_the_default_regions_stack() -> None:
+    """No `env` region and no settings: the stack takes the default region's table whole, the
+    stack infra/app.py builds for Frankfurt, not Frankfurt's model with Ireland's topic
+    guardrail and CloudFront."""
+    _, stack = andur_stacks(cdk.App(context=deploy_context()), "NoRegion", env=cdk.Environment())
+    assert cdk.Token.is_unresolved(stack.region)
+    assert stack.price_region == DEFAULT_REGION == "eu-central-1"
+    assert stack.answer_model_id == "qwen.qwen3-235b-a22b-2507-v1:0"
+    assert stack.topic_model_id == TOPIC_MODEL_ID
+    assert stack.answer_guardrail_profile is False
+    assert stack.behind_cloudfront is False
+    assert stack.topic_guardrail is None and stack.distribution is None
+    template = Template.from_stack(stack)
+    assert len(template.find_resources("AWS::Bedrock::Guardrail")) == 2
+    for resource_type in CLOUDFRONT_TYPES:
+        assert template.find_resources(resource_type) == {}
+    variables = resource_of(stack, template, stack.answer_function)["Properties"]["Environment"][
+        "Variables"
+    ]
+    assert variables["MODEL_ID"] == "qwen.qwen3-235b-a22b-2507-v1:0"
+    assert variables["TOPIC_MODEL_ID"] == TOPIC_MODEL_ID
+    assert variables["PRICE_DATE"] == FRANKFURT_PRICE_DATE
 
 
 # --- The fallback in Frankfurt: the topic guardrail through the profile ------
