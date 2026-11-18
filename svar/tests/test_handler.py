@@ -1175,7 +1175,7 @@ def test_only_a_checked_workspace_name_names_a_key(aws: dict[str, Any]) -> None:
     for name in ("../other", "a/b", "Quillmoor", ""):
         with pytest.raises(ValueError):
             keys.read_workspace_key(
-                keys.KeyStore("/andur/api-keys", "eu-west-1", handler.key_client, log.log_event),
+                keys.KeyStore("/andur/api-keys", "eu-central-1", handler.key_client, log.log_event),
                 name,
             )
     assert aws["ssm"].calls == []
@@ -1415,7 +1415,7 @@ def test_rereads_for_wrong_keys_are_capped_across_workspaces(
 
 def timeout_errors() -> list[Exception]:
     exceptions = pytest.importorskip("botocore.exceptions")
-    endpoint = "https://ssm.eu-west-1.amazonaws.com/"
+    endpoint = "https://ssm.eu-central-1.amazonaws.com/"
     return [
         exceptions.ReadTimeoutError(endpoint_url=endpoint),
         exceptions.EndpointConnectionError(endpoint_url=endpoint),
@@ -1533,7 +1533,7 @@ def test_missing_boto3_is_a_configuration_error(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(aws_module, "client", no_sdk)
     with pytest.raises(ConfigurationError, match="boto3"):
-        clients.client("ssm", "us-east-1")
+        clients.client("ssm", "eu-central-1")
 
 
 def test_the_modules_import_and_read_requests_without_boto3() -> None:
@@ -1701,7 +1701,7 @@ def test_a_table_that_cannot_be_reached_is_500_and_not_a_free_pass(
     caplog.set_level(logging.INFO, logger="andur")
     aws["dynamodb"].error = client_error(
         "ResourceNotFoundException",
-        "Requested resource not found: arn:aws:dynamodb:eu-west-1:111122223333:table/x",
+        "Requested resource not found: arn:aws:dynamodb:eu-central-1:111122223333:table/x",
         operation="UpdateItem",
     )
 
@@ -2714,7 +2714,7 @@ Rules:
 - Never write that sentence together with an answer, and never write it when the sources answer a part of the question.
 - Answer in the language of the question, in a few sentences."""  # noqa: E501
 
-#: The prompt of 75cfce8 (06.10.2026), which Nova Pro in Ireland answered q02 and q19 with in 10
+#: The prompt of 75cfce8 (06.10.2026), which Nova Pro answered q02 and q19 with in 10
 #: of 10 tries each on 14.10.2026 (docs/decisions.md).
 SENTENCE_FIRST_PROMPT = """You answer questions about a company's internal documents.
 
@@ -3684,7 +3684,7 @@ def test_a_bedrock_failure_is_logged_by_its_code_and_never_by_its_message(
     caplog.set_level(logging.INFO, logger="andur")
     aws["bedrock-runtime"].error = client_error(
         "ValidationException",
-        "malformed input near 'the secret plan' (arn:aws:bedrock:us-east-1:123456789012:thing)",
+        "malformed input near 'the secret plan' (arn:aws:bedrock:eu-central-1:123456789012:thing)",
     )
     _, body = call(event())
     (line,) = [line for line in log_lines(caplog) if line["event"] == "converse-failed"]
@@ -3700,7 +3700,7 @@ def test_a_retrieval_failure_is_logged_by_its_code_and_never_by_its_message(
     caplog.set_level(logging.INFO, logger="andur")
     aws["bedrock-agent-runtime"].error = client_error(
         "ValidationException",
-        "bad query 'the secret plan' (arn:aws:bedrock:us-east-1:123456789012:thing)",
+        "bad query 'the secret plan' (arn:aws:bedrock:eu-central-1:123456789012:thing)",
     )
     _, body = call(event())
     (line,) = [line for line in log_lines(caplog) if line["event"] == "retrieve-failed"]
