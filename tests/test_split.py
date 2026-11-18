@@ -32,18 +32,6 @@ MOVED = {
     "DocumentsDataSource": "AWS::Bedrock::DataSource",
 }
 
-#: Built anew in TaugStack under the ids it had in AndurStack: its provider's policy
-#: (AWS::IAM::Policy) cannot be moved.
-KEY_RETIRER = {
-    "ApiKeyFunction7C99575B",
-    "ApiKeyFunctionLogsB0447CCF",
-    "ApiKeyFunctionRoleC17A4D17",
-    "ApiKeyProviderLogsF4655EA2",
-    "ApiKeyProviderframeworkonEvent9849A943",
-    "ApiKeyProviderframeworkonEventServiceRole12F1E908",
-    "ApiKeyProviderframeworkonEventServiceRoleDefaultPolicy3A0B3B27",
-}
-
 #: Svar's resources, which stay in AndurStack: the page comes from the function's own URL
 #: and a layer.
 SVAR = {
@@ -111,7 +99,7 @@ def test_each_stack_holds_exactly_its_logical_ids(
     templates: tuple[dict[str, Any], dict[str, Any]],
 ) -> None:
     taug, svar = templates
-    assert set(resources(taug)) == set(MOVED) | KEY_RETIRER
+    assert set(resources(taug)) == set(MOVED)
     assert set(resources(svar)) == SVAR
 
 

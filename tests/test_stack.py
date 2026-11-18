@@ -496,13 +496,11 @@ def test_the_only_wildcard_resources_are_model_listing_and_cache_clearing(
 def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
     stack: SvarStack, template: Template, taug_stack: TaugStack, taug_template: Template
 ) -> None:
-    """Known exceptions: both belong to functions CDK generates for a deploy.
-
-    One is the key retirer's, which no resource calls any more, the other runs the
-    deploy drain. Each gets AWSLambdaBasicExecutionRole from its construct; this stack does
-    not create these roles and cannot narrow them without replacing the
-    constructs. Every role the stack defines itself carries inline policies
-    only, and both of these run during a deploy and never afterwards.
+    """The known exception belongs to a function CDK generates for a deploy: the framework
+    that runs the deploy drain. It gets AWSLambdaBasicExecutionRole from its construct; this
+    stack does not create the role and cannot narrow it without replacing the construct.
+    Every role the stacks define themselves carries inline policies only, and this one runs
+    during a deploy and never afterwards.
     """
 
     def framework_role(owner: Any, provider: str) -> Any:
@@ -511,7 +509,6 @@ def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
     expected = {
         (owner.stack_name, owner.get_logical_id(role.node.default_child))
         for owner, role in [
-            (taug_stack, framework_role(taug_stack, "ApiKeyProvider")),
             (stack, framework_role(stack, "DeployDrainProvider")),
         ]
     }
@@ -565,14 +562,13 @@ def test_role_can_only_be_assumed_by_bedrock_in_this_account(
 def test_the_only_compute_that_runs_between_deploys_is_the_answer_function(
     stack: SvarStack, template: Template, taug_template: Template
 ) -> None:
-    """Five functions, and four of them only ever run during a deploy.
+    """Three functions, and two of them only ever run during a deploy.
 
-    The answer function, the retired key function and the deploy drain, each of the two
-    with the CDK framework that runs it. Nothing else runs, so nothing else can cost money
-    while nobody asks.
+    The answer function, and the deploy drain with the CDK framework that runs it. Nothing
+    else runs, so nothing else can cost money while nobody asks; Taug's stack runs no code.
     """
     template.resource_count_is("AWS::Lambda::Function", 3)
-    taug_template.resource_count_is("AWS::Lambda::Function", 2)
+    taug_template.resource_count_is("AWS::Lambda::Function", 0)
     functions = template.find_resources("AWS::Lambda::Function")
     assert stack.get_logical_id(stack.answer_function.node.default_child) in functions
 
@@ -1376,17 +1372,6 @@ def test_no_role_may_do_more_than_count_on_the_budget_table(template: Template) 
 # --- Workspace keys ------------------------------------------------------
 
 
-#: The logical ids of the key function as deployed before 2026-10-01. In Andur's one stack the
-#: Delete of each removed key resource reached the function under these ids. Taug's stack
-#: builds it anew under the same ids, as its first content (taug/infra/keys.py); no resource
-#: sends a Delete there.
-DEPLOYED_KEY_FUNCTION_IDS = {
-    "ApiKeyFunctionRoleC17A4D17": "AWS::IAM::Role",
-    "ApiKeyFunction7C99575B": "AWS::Lambda::Function",
-    "ApiKeyProviderframeworkonEvent9849A943": "AWS::Lambda::Function",
-}
-
-
 def test_the_stack_creates_no_workspace_key(template: Template) -> None:
     """Keys come from `python -m taug.scripts.workspace add`; no workspace is named in the code.
     The one custom resource left is the deploy drain, which waits and touches nothing."""
@@ -1396,14 +1381,6 @@ def test_the_stack_creates_no_workspace_key(template: Template) -> None:
         if resource["Type"].startswith("Custom::")
     )
     assert custom == ["Custom::AndurDeployDrain"]
-
-
-def test_the_key_function_keeps_its_logical_ids(taug_template: Template) -> None:
-    """Built anew in Taug's stack, under the ids it had in Andur's one stack, so the split
-    keeps the names the tests of the split (tests/test_split.py) hold."""
-    resources = taug_template.to_json()["Resources"]
-    for logical_id, resource_type in DEPLOYED_KEY_FUNCTION_IDS.items():
-        assert resources[logical_id]["Type"] == resource_type, logical_id
 
 
 def test_no_role_may_write_or_delete_a_key(template: Template) -> None:
@@ -1423,21 +1400,13 @@ def test_no_role_may_write_or_delete_a_key(template: Template) -> None:
     assert ssm_actions == ["ssm:GetParameter"]
 
 
-def test_the_key_function_role_may_only_write_its_log(
-    taug_stack: TaugStack, taug_template: Template
-) -> None:
-    policies = role_policies(
-        taug_stack, taug_template, taug_stack.node.find_child("ApiKeyFunctionRole")
+def test_taugs_stack_holds_no_key_resource_and_no_key_retirer(taug_template: Template) -> None:
+    """The key retirer answered the Delete of the key resources the stacks used to have; no
+    stack holds one any more, so it is gone too (docs/decisions.md)."""
+    rendered = json.dumps(taug_template.to_json())
+    assert "Custom::AndurApiKey" not in rendered and "ApiKey" not in rendered.replace(
+        "ApiKeyParameterPath", ""
     )
-    assert set(policies) == {"WriteLogs"}
-
-
-def test_the_key_function_runs_the_handler_that_deletes_nothing(
-    taug_stack: TaugStack, taug_template: Template
-) -> None:
-    function = resource_of(taug_stack, taug_template, taug_stack.node.find_child("ApiKeyFunction"))
-    assert function["Properties"]["Handler"] == "handler.on_event"
-    assert "deletes nothing" in function["Properties"]["Description"]
 
 
 # --- Logs ----------------------------------------------------------------
@@ -1448,7 +1417,7 @@ def test_every_log_group_has_a_retention_and_goes_with_the_stack(
 ) -> None:
     log_groups = template.find_resources("AWS::Logs::LogGroup")
     taug_log_groups = taug_template.find_resources("AWS::Logs::LogGroup")
-    assert (len(log_groups), len(taug_log_groups)) == (3, 2)
+    assert (len(log_groups), len(taug_log_groups)) == (3, 0)
     for log_group in [*log_groups.values(), *taug_log_groups.values()]:
         assert log_group["Properties"]["RetentionInDays"] == 30
         assert log_group["DeletionPolicy"] == "Delete"

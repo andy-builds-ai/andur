@@ -3,7 +3,7 @@
 from aws_cdk import CfnOutput, Stack
 from constructs import Construct
 
-from taug.infra.keys import API_KEY_PARAMETER_PATH, create_key_retirer
+from taug.infra.keys import API_KEY_PARAMETER_PATH
 from taug.infra.knowledge_base import (
     WORKSPACE_PREFIX,
     create_data_source,
@@ -19,9 +19,8 @@ TAUG_DESCRIPTION = "Taug: documents, vectors, knowledge base and keys, what Andu
 
 
 class TaugStack(Stack):
-    """Taug's part of Andur: the documents, the vectors, the knowledge base over them, and
-    the key retirer. Svar's stack (svar/infra/stack.py) depends on it and reads the knowledge
-    base from it.
+    """Taug's part of Andur: the documents, the vectors and the knowledge base over them. Svar's
+    stack (svar/infra/stack.py) depends on it and reads the knowledge base from it.
 
     The construct ids are the ones these resources had in Andur's one stack, so their
     logical ids are the same and `cdk refactor` moves them instead of building them anew
@@ -38,7 +37,6 @@ class TaugStack(Stack):
             self, self.vector_index, self.knowledge_base_role
         )
         self.data_source = create_data_source(self, self.knowledge_base, self.documents_bucket)
-        self.key_retirer = create_key_retirer(self)
         self._create_outputs()
 
     def _create_outputs(self) -> None:
