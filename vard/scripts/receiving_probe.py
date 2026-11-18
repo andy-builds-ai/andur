@@ -26,15 +26,13 @@ from pathlib import Path
 from typing import Any
 
 from svar.scripts.evaluate import stays_in_the_eu
-from taug.infra.answer_models import FRANKFURT_MODELS, AnswerModel, region_models
+from taug.infra.answer_models import DEFAULT_REGION, FRANKFURT_MODELS, AnswerModel, region_models
 from taug.scripts import utf8_output
 from taug.scripts.aws import AwsProblem, error_code, explain, is_login_problem
 from vard import engine, receiving
 from vard.scripts.tool_probe import READ_SECONDS, REFUSED_AS_SENT, model_client
 
 CASES_FILE = Path(__file__).with_name("receiving-cases.json")
-
-DEFAULT_REGION = "eu-central-1"
 
 MODELS = FRANKFURT_MODELS
 

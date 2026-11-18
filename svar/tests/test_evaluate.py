@@ -18,7 +18,7 @@ from svar.infra.answer_function import ANSWER_FUNCTION_NAME
 from svar.scripts import evaluate
 from svar.tests.test_handler import ENVIRONMENT
 from taug.access.workspaces import WORKSPACE_NAME
-from taug.infra.answer_models import ANSWER_MODELS, REGIONS, AnswerModel
+from taug.infra.answer_models import FRANKFURT_MODELS, REGIONS, AnswerModel
 
 #: The answer function's modules, as the scripts take them (`evaluate.import_app`).
 app = evaluate.import_app()
@@ -165,9 +165,8 @@ def test_the_function_is_the_stacks_own() -> None:
     assert evaluate.FUNCTION_NAME == ANSWER_FUNCTION_NAME
 
 
-@pytest.mark.parametrize("region", sorted(REGIONS))
 def test_the_models_to_choose_from_are_those_of_the_region(
-    region: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """``--model`` takes a name from the table of ``--region`` and refuses one from another
     region's table, before any AWS call."""
@@ -176,10 +175,11 @@ def test_the_models_to_choose_from_are_those_of_the_region(
         raise AssertionError("the run reached AWS")
 
     monkeypatch.setattr(evaluate, "deployed_environment", paid)
-    other = next(r for r in REGIONS if r != region)
-    only_there = {m.name for m in REGIONS[other].models} - {m.name for m in REGIONS[region].models}
-    name = sorted(only_there)[0]
-    assert evaluate.main(["--region", region, "--model", name]) == 2
+    elsewhere = AnswerModel("Only Elsewhere", "x.only-elsewhere-v1:0", "0.001", "0.002")
+    frankfurt = REGIONS["eu-central-1"]
+    monkeypatch.setitem(REGIONS, "eu-test-1", frankfurt._replace(models=(elsewhere,)))
+    name = elsewhere.name
+    assert evaluate.main(["--region", "eu-central-1", "--model", name]) == 2
     captured = capsys.readouterr()
     assert captured.err.startswith(f"error: unknown model ['{name}']")
     assert captured.out == ""
@@ -495,7 +495,7 @@ def test_the_summary_counts_rates_rejections_and_the_mean_cost() -> None:
          "rejected": 0, "first_call_rejected": False, "attempts": 1,
          "body": {"cost_usd": 0.0004, "guardrail": {"action": "none"}}},
     ]  # fmt: skip
-    summary = evaluate.summarise(ANSWER_MODELS[0], results)
+    summary = evaluate.summarise(FRANKFURT_MODELS[0], results)
     assert summary["correct"] == 3 and summary["questions"] == 4
     assert summary["correct_first_try"] == 2 and summary["rejected_first_try"] == 2
     assert summary["by_kind"]["answer"] == (1, 2)
@@ -507,7 +507,7 @@ def test_the_summary_counts_rates_rejections_and_the_mean_cost() -> None:
     assert summary["median_seconds"] == 2.5
     header, rule, row = evaluate.table([summary])
     assert row == (
-        f"| {ANSWER_MODELS[0].name} | 3/4 | 2/4 | 2/4 | 1/2 | 2/2 | 1/2 | 0/0 | 1/2 "
+        f"| {FRANKFURT_MODELS[0].name} | 3/4 | 2/4 | 2/4 | 1/2 | 2/2 | 1/2 | 0/0 | 1/2 "
         "| 0.000867 | 2.5 | 1 |"
     )
     assert "| Refused right | Blocked by guardrail |" in header

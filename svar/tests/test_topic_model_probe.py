@@ -133,8 +133,7 @@ def test_the_probe_picks_the_model_where_the_region_has_one(
     )
     assert topic_probe.main(["--region", "eu-central-1"]) == 0
     assert picked == ["openai.gpt-oss-20b-1:0"]
-    assert topic_probe.main(["--region", "eu-west-1", "--topic-check", "model"]) == 2
-    assert topic_probe.main(["--region", "us-east-1"]) == 2
+    assert topic_probe.main(["--region", "eu-west-2"]) == 2
 
 
 def test_topic_model_picks_another_model_of_the_regions_table(
@@ -152,26 +151,6 @@ def test_topic_model_picks_another_model_of_the_regions_table(
     assert picked == ["openai.gpt-oss-120b-1:0", "qwen.qwen3-32b-v1:0"]
 
 
-def test_topic_model_measures_a_model_where_the_stack_checks_with_a_guardrail(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    picked: list[str] = []
-    monkeypatch.setattr(
-        topic_model_probe, "main", lambda args, model_id: picked.append(model_id) or 0
-    )
-    assert topic_probe.main(["--region", "eu-west-1", "--topic-model", "x.model"]) == 0
-    assert picked == ["x.model"]
-
-
-def test_topic_model_with_a_guardrail_check_is_refused(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with pytest.raises(SystemExit) as stopped:
-        topic_probe.main(["--topic-check", "guardrail", "--topic-model", "openai.gpt-oss-120b-1:0"])
-    assert stopped.value.code == 2
-    assert "--topic-model measures a topic model" in capsys.readouterr().err
-
-
 def test_topic_model_with_deployed_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
     """--deployed measures the deployed function's model; another one named would be ignored."""
     with pytest.raises(SystemExit) as stopped:
@@ -183,15 +162,15 @@ def test_topic_model_with_deployed_is_refused(capsys: pytest.CaptureFixture[str]
 def test_topic_model_without_a_price_in_the_region_stops_before_any_call(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """gpt-oss-120b has no price in eu-west-1: the run would pay without a report."""
+    """A model without a price in the region: the run would pay without a report."""
 
     def no_call(service: str, region: str) -> None:
         raise AssertionError(f"{service} was called in {region}")
 
     monkeypatch.setattr(clients, "client", no_call)
-    code = topic_probe.main(["--region", "eu-west-1", "--topic-model", "openai.gpt-oss-120b-1:0"])
+    code = topic_probe.main(["--region", "eu-central-1", "--topic-model", "x.unpriced-v1:0"])
     assert code == 2
-    assert "has no price for eu-west-1" in capsys.readouterr().err
+    assert "has no price for eu-central-1" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(("failed", "code"), [([], 0), (["no readable verdict"], 2)])

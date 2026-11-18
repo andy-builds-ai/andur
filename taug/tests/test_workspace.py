@@ -778,12 +778,12 @@ def test_the_window_is_named_also_when_the_ingestion_job_cannot_start(
             f"python -m taug.scripts.workspace --region eu-central-1 remove {TARGET} --yes",
         ),
         (
-            ("--region", "eu-west-1"),
-            f"python -m taug.scripts.workspace --region eu-west-1 remove {TARGET} --yes",
+            ("--region", "eu-west-2"),
+            f"python -m taug.scripts.workspace --region eu-west-2 remove {TARGET} --yes",
         ),
         (
-            ("--stack-name", "OtherStack", "--region", "eu-west-1"),
-            "python -m taug.scripts.workspace --region eu-west-1 --stack-name OtherStack "
+            ("--stack-name", "OtherStack", "--region", "eu-west-2"),
+            "python -m taug.scripts.workspace --region eu-west-2 --stack-name OtherStack "
             f"remove {TARGET} --yes",
         ),
     ],
@@ -808,9 +808,9 @@ def test_the_other_commands_a_message_names_carry_the_stack_too(
 ) -> None:
     account = Account()
     del account.ssm.parameters[f"{PATH}/{TARGET}"]
-    assert run(account, "--region", "eu-west-1", "plan", TARGET, "firma") == 2
+    assert run(account, "--region", "eu-west-2", "plan", TARGET, "firma") == 2
     assert (
-        f"`python -m taug.scripts.workspace --region eu-west-1 add {TARGET} --plan firma`"
+        f"`python -m taug.scripts.workspace --region eu-west-2 add {TARGET} --plan firma`"
         in capsys.readouterr().err
     )
 

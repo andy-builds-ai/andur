@@ -39,5 +39,5 @@ def frankfurt_topic_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(
         answer_models.REGIONS,
         "eu-central-1",
-        frankfurt._replace(topic_model_id="openai.gpt-oss-20b-1:0", answer_guardrail_profile=False),
+        frankfurt._replace(topic_model_id="openai.gpt-oss-20b-1:0"),
     )

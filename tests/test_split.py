@@ -4,7 +4,7 @@
 properties are unchanged, and refuses the whole move when anything else changed
 (docs/decisions.md). These tests pin which logical ids each stack holds in each region, so that
 a change between the deploy of the new stack and the move shows up here first, and they check
-the conditions of the move itself.
+the conditions of the move itself. The one region is Frankfurt.
 """
 
 import json
@@ -15,6 +15,7 @@ import pytest
 from aws_cdk.assertions import Template
 
 from svar.scripts.ask import SVAR_STACK_NAME
+from taug.infra.answer_models import DEFAULT_REGION
 from taug.infra.shared import REPOSITORY_ROOT
 from taug.scripts.aws import TAUG_STACK_NAME
 from tests.test_stack import andur_stacks, deploy_context
@@ -43,9 +44,9 @@ KEY_RETIRER = {
     "ApiKeyProviderframeworkonEventServiceRoleDefaultPolicy3A0B3B27",
 }
 
-#: Svar's resources, which stay in AndurStack. Ireland has CloudFront and the page in a
-#: bucket; Frankfurt serves the page from the function's own URL and a layer.
-SVAR_BOTH = {
+#: Svar's resources, which stay in AndurStack: the page comes from the function's own URL
+#: and a layer.
+SVAR = {
     "AnswerFunctionC9E3DEFB",
     "AnswerFunctionFunctionUrl222F3513",
     "AnswerFunctionLogsFF553602",
@@ -63,38 +64,13 @@ SVAR_BOTH = {
     "ExcerptGuardrail",
     "ExcerptGuardrailVersion",
     "KeyBudgetTable34ED4D7A",
-}
-SVAR = {
-    "eu-west-1": SVAR_BOTH
-    | {
-        "AnswerOriginAccessControl4A7F44F8",
-        "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C81C01536",
-        "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756CServiceRole89A01265",
-        "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756CServiceRoleDefaultPolicy88902FDF",
-        "InvokeFunctionFromCloudFront",
-        "SecurityHeadersE66B69D3",
-        "SiteBucket397A1860",
-        "SiteBucketPolicy3AC1D0F8",
-        "SiteDistribution3FF9535D",
-        "SiteDistributionOrigin2InvokeFromApiForAndurStackSiteDistributionOrigin250E2A2DA52E31D8C",
-        "SiteDistributionOrigin2InvokeFunctionFromCloudFrontForAndurStackSiteDistributionOrigin250E2A2DA5E080678",
-        "SiteFilesAwsCliLayer5D1C20DE",
-        "SiteFilesCustomResource8693D8DF",
-        "SiteFilesLogsE08292DF",
-        "SiteOriginAccessControl4DD454FF",
-        "TopicGuardrail",
-        "TopicGuardrailVersion",
-    },
-    "eu-central-1": SVAR_BOTH
-    | {
-        "AnswerFunctioninvokefunction8CE8DDED",
-        "AnswerFunctioninvokefunctionurlF5B59E2A",
-        "PageLayer6DEEDD1A",
-    },
+    "AnswerFunctioninvokefunction8CE8DDED",
+    "AnswerFunctioninvokefunctionurlF5B59E2A",
+    "PageLayer6DEEDD1A",
 }
 
 #: Types CloudFormation cannot move or cannot provision on its own (describe-type, run by the
-#: operator in both regions on 09.11.2026): they must stay where they are.
+#: operator on 09.11.2026): they must stay where they are.
 CANNOT_MOVE = {
     "AWS::Bedrock::GuardrailVersion",
     "AWS::Lambda::Permission",
@@ -113,17 +89,12 @@ def test_the_stack_names_are_the_ones_aws_and_the_scripts_know() -> None:
     assert '"AndurStack"' not in app and '"TaugStack"' not in app
 
 
-@pytest.fixture(scope="module", params=["eu-west-1", "eu-central-1"])
-def region(request: pytest.FixtureRequest) -> str:
-    return request.param
-
-
 @pytest.fixture(scope="module")
-def templates(region: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Taug's and Svar's templates for ``region``, as infra/app.py builds them: Svar's stack
-    under the name AndurStack, the logical ids of its CloudFront permissions carry it."""
+def templates() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Taug's and Svar's templates for Frankfurt, as infra/app.py builds them: Svar's stack
+    under the name AndurStack."""
     taug, svar = andur_stacks(
-        cdk.App(context=deploy_context()), "AndurStack", env=cdk.Environment(region=region)
+        cdk.App(context=deploy_context()), "AndurStack", env=cdk.Environment(region=DEFAULT_REGION)
     )
     return Template.from_stack(taug).to_json(), Template.from_stack(svar).to_json()
 
@@ -137,11 +108,11 @@ def resources(template: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_each_stack_holds_exactly_its_logical_ids(
-    region: str, templates: tuple[dict[str, Any], dict[str, Any]]
+    templates: tuple[dict[str, Any], dict[str, Any]],
 ) -> None:
     taug, svar = templates
     assert set(resources(taug)) == set(MOVED) | KEY_RETIRER
-    assert set(resources(svar)) == SVAR[region]
+    assert set(resources(svar)) == SVAR
 
 
 def test_what_moves_keeps_its_logical_id_and_type(

@@ -25,8 +25,6 @@ from aws_cdk import (
 
 from svar.app.page import PAGE_FOLDER_VARIABLE
 from svar.infra.answer_prompts import prompt_of
-from svar.infra.guardrails import GUARDRAIL_PROFILE_REGIONS, guardrail_profile_arn
-from svar.infra.web import WEB_FOLDER
 from taug.infra.answer_models import (
     DEFAULT_REGION,
     answer_model,
@@ -71,8 +69,7 @@ PACKAGE_EXCLUDES = tuple(pattern.removeprefix("**/") for pattern in ASSET_EXCLUD
 #: List API behind aws.amazon.com/bedrock/pricing, read on the region's price
 #: date in taug/infra/answer_models.py. The token prices here are the default
 #: model's; a stack takes its own model's from its region's table. The three
-#: guardrail prices are the same in eu-west-1 and eu-central-1 (price lists of
-#: 28.09.2026 and 06.10.2026).
+#: guardrail prices are eu-central-1's (price list of 06.10.2026).
 PRICE_INPUT_PER_1K_TOKENS = answer_model(ANSWER_MODEL_ID).input_per_1k
 PRICE_OUTPUT_PER_1K_TOKENS = answer_model(ANSWER_MODEL_ID).output_per_1k
 PRICE_TOPIC_PER_1K_UNITS = "0.15"
@@ -118,6 +115,9 @@ DEPLOY_DRAIN_SECONDS = ANSWER_TIMEOUT_SECONDS + 30
 
 #: Where Lambda unpacks a layer: the page's files, where the function serves them.
 PAGE_LAYER_FOLDER = "/opt"
+
+#: The page's files, which the function serves from its layer.
+WEB_FOLDER = REPOSITORY_ROOT / "svar" / "web"
 
 
 def create_budget_table(stack: "SvarStack") -> dynamodb.TableV2:
@@ -195,38 +195,22 @@ def create_answer_role(
     log_group: logs.LogGroup,
     guardrail: bedrock.CfnGuardrail,
     excerpt_guardrail: bedrock.CfnGuardrail,
-    topic_guardrail: bedrock.CfnGuardrail | None,
 ) -> iam.Role:
     """The execution role of the answer function: five inline policies, every statement
-    on named resources. Most name one; `ApplyAnswerGuardrail` names nine — the three
-    guardrails, and the EU guardrail profile in each of its six regions, which the topic
-    guardrail runs through and, where `answer_guardrail_profile`, the answer guardrail. With
-    a topic model it names the two guardrails alone, and `InvokeTopicModel` lets the function
-    call that one model in the stack's region, with nothing else.
+    on named resources. `ApplyAnswerGuardrail` names the two guardrails, and
+    `InvokeTopicModel` lets the function call the topic model in the stack's region, with
+    nothing else.
 
     It names no guardrail version, so a deploy that replaces one leaves the role as it is.
     """
     guardrails = [guardrail.attr_guardrail_arn, excerpt_guardrail.attr_guardrail_arn]
-    if topic_guardrail is not None:
-        guardrails += [
-            topic_guardrail.attr_guardrail_arn,
-            # The answer and topic guardrails run through the EU profile.
-            *(guardrail_profile_arn(stack, region) for region in GUARDRAIL_PROFILE_REGIONS),
-        ]
-    topic_model = (
-        []
-        if stack.topic_model_id is None
-        else [
-            iam.PolicyStatement(
-                sid="InvokeTopicModel",
-                actions=["bedrock:InvokeModel"],
-                # The stack's region by name, not by reference: the template shows where.
-                resources=[
-                    f"arn:{Aws.PARTITION}:bedrock:{stack.region}::foundation-model/"
-                    f"{stack.topic_model_id}"
-                ],
-            )
-        ]
+    topic_model = iam.PolicyStatement(
+        sid="InvokeTopicModel",
+        actions=["bedrock:InvokeModel"],
+        # The stack's region by name, not by reference: the template shows where.
+        resources=[
+            f"arn:{Aws.PARTITION}:bedrock:{stack.region}::foundation-model/{stack.topic_model_id}"
+        ],
     )
     return iam.Role(
         stack,
@@ -269,7 +253,7 @@ def create_answer_role(
                         actions=["bedrock:ApplyGuardrail"],
                         resources=guardrails,
                     ),
-                    *topic_model,
+                    topic_model,
                 ]
             ),
             "WriteLogs": write_logs_policy(log_group),
@@ -329,24 +313,10 @@ def create_answer_function(
     log_group: logs.LogGroup,
     guardrail_version: bedrock.CfnGuardrailVersion,
     excerpt_guardrail_version: bedrock.CfnGuardrailVersion,
-    topic_guardrail_version: bedrock.CfnGuardrailVersion | None,
-    page_layer: lambda_.LayerVersion | None,
+    page_layer: lambda_.LayerVersion,
 ) -> lambda_.Function:
     """The question handler from app/, configured entirely through its environment: the
-    topic guardrail's id and version, or the topic model and its prices; with
-    ``page_layer``, the folder of the page it serves itself."""
-    if topic_guardrail_version is not None:
-        topic_check = {
-            "TOPIC_GUARDRAIL_ID": topic_guardrail_version.attr_guardrail_id,
-            "TOPIC_GUARDRAIL_VERSION": topic_guardrail_version.attr_version,
-        }
-    else:
-        assert stack.topic_model is not None
-        topic_check = {
-            "TOPIC_MODEL_ID": stack.topic_model.model_id,
-            "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS": stack.topic_model.input_per_1k,
-            "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": stack.topic_model.output_per_1k,
-        }
+    guardrails, the topic model and its prices, and the folder of the page it serves."""
     return lambda_.Function(
         stack,
         "AnswerFunction",
@@ -361,9 +331,9 @@ def create_answer_function(
         reserved_concurrent_executions=reserved_concurrency(stack),
         role=role,
         log_group=log_group,
-        layers=None if page_layer is None else [page_layer],
+        layers=[page_layer],
         environment={
-            **({} if page_layer is None else {PAGE_FOLDER_VARIABLE: PAGE_LAYER_FOLDER}),
+            PAGE_FOLDER_VARIABLE: PAGE_LAYER_FOLDER,
             "KNOWLEDGE_BASE_ID": knowledge_base.attr_knowledge_base_id,
             "MODEL_ID": stack.answer_model_id,
             "ANSWER_PROMPT": prompt_of(stack.answer_model),
@@ -378,7 +348,9 @@ def create_answer_function(
             "GUARDRAIL_VERSION": guardrail_version.attr_version,
             "EXCERPT_GUARDRAIL_ID": excerpt_guardrail_version.attr_guardrail_id,
             "EXCERPT_GUARDRAIL_VERSION": excerpt_guardrail_version.attr_version,
-            **topic_check,
+            "TOPIC_MODEL_ID": stack.topic_model.model_id,
+            "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS": stack.topic_model.input_per_1k,
+            "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": stack.topic_model.output_per_1k,
             "PRICE_INPUT_PER_1K_TOKENS": stack.answer_model.input_per_1k,
             "PRICE_OUTPUT_PER_1K_TOKENS": stack.answer_model.output_per_1k,
             "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
@@ -390,32 +362,25 @@ def create_answer_function(
 
 
 def reserved_concurrency(stack: "SvarStack") -> int | None:
-    """The answer function's reservation: `answer_max_concurrency`, and where it serves the
-    page as well, `PAGE_LOAD_CONCURRENCY` on top; None leaves it to the account."""
+    """The answer function's reservation: `answer_max_concurrency`, and `PAGE_LOAD_CONCURRENCY`
+    on top for the page it serves as well; None leaves it to the account."""
     if stack.answer_max_concurrency is None:
         return None
-    page = 0 if stack.behind_cloudfront else PAGE_LOAD_CONCURRENCY
-    return stack.answer_max_concurrency + page
+    return stack.answer_max_concurrency + PAGE_LOAD_CONCURRENCY
 
 
 def create_function_url(stack: "SvarStack", function: lambda_.Function) -> lambda_.FunctionUrl:
-    """The function's own HTTPS address. Behind CloudFront set to AWS_IAM: reachable for
-    CloudFront alone. Without CloudFront open (NONE): it is the address, and the key header
-    is the gate, as it is behind CloudFront. CDK grants both actions a URL of NONE needs
+    """The function's own HTTPS address, open (NONE): it is the address of page and
+    questions, and the key header is the gate. CDK grants both actions a URL of NONE needs
     since October 2025, `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction`, the second
     only through the URL."""
-    auth_type = (
-        lambda_.FunctionUrlAuthType.AWS_IAM
-        if stack.behind_cloudfront
-        else lambda_.FunctionUrlAuthType.NONE
-    )
-    return function.add_function_url(auth_type=auth_type)
+    return function.add_function_url(auth_type=lambda_.FunctionUrlAuthType.NONE)
 
 
 def create_page_layer(stack: "SvarStack") -> lambda_.LayerVersion:
-    """The page's files from web/, for a function that serves them itself; Lambda unpacks
-    them into `PAGE_LAYER_FOLDER`. No bucket and nothing public: the files reach a browser
-    only through the function."""
+    """The page's files from web/, which the function serves itself; Lambda unpacks them
+    into `PAGE_LAYER_FOLDER`. No bucket and nothing public: the files reach a browser only
+    through the function."""
     return lambda_.LayerVersion(
         stack,
         "PageLayer",

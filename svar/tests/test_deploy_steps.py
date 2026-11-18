@@ -31,20 +31,24 @@ from svar.infra.answer_function import (
     EU_PROFILE_PREFIX,
 )
 from svar.infra.deploy_drain import handler as drain_handler
-from tests.test_stack import IRELAND, REGIONAL_MODEL_ID, TEST_REGION, andur_stacks, deploy_context
+from taug.infra import answer_models
+from tests.test_stack import REGIONAL_MODEL_ID, TEST_REGION, andur_stacks, deploy_context
 
 ACCOUNT = "111122223333"
-#: Ireland's stack, the one region with three guardrails and the model behind the EU profile.
+#: Frankfurt's stack, with its answer and excerpt guardrails.
 REGION = TEST_REGION
-#: Ireland's answer model, an EU profile: the walk checks the profile's guardrail condition.
-ANSWER_MODEL_ID = IRELAND.answer_model_id
+#: Frankfurt's answer model, in the region.
+ANSWER_MODEL_ID = answer_models.REGIONS[REGION].answer_model_id
+#: A model of Frankfurt's table behind the EU profile: the walk checks the profile's guardrail
+#: condition too.
+PROFILE_MODEL_ID = "eu.amazon.nova-pro-v1:0"
 
 #: The number of each guardrail version before the deploy, and of the one it makes.
 OLD, NEW = "3", "4"
 
-#: The environment variables of the answer, excerpt and topic guardrail, in the order of
+#: The environment variables of the answer and the excerpt guardrail, in the order of
 #: `Synthesised.versions`.
-PREFIXES = ("", "EXCERPT_", "TOPIC_")
+PREFIXES = ("", "EXCERPT_")
 
 #: The answer role's condition as deployed until this change, on version 3.
 DEPLOYED_ROLE_CONDITION = {
@@ -74,7 +78,7 @@ class Synthesised:
     role: str
     function: str
     drain: str
-    versions: tuple[str, str, str]
+    versions: tuple[str, str]
     entry_point: str
 
 
@@ -102,7 +106,6 @@ def synthesise(
         versions=(
             stack.get_logical_id(stack.guardrail_version),
             stack.get_logical_id(stack.excerpt_guardrail_version),
-            stack.get_logical_id(stack.topic_guardrail_version),
         ),
         entry_point=entry_point,
     )
@@ -110,24 +113,8 @@ def synthesise(
 
 def threshold_changed(patch: pytest.MonkeyPatch) -> None:
     """Replaces the answer guardrail's version."""
-    patch.setattr(stack_guardrails, "GROUNDING_THRESHOLD", 0.75)
-
-
-def topic_changed(patch: pytest.MonkeyPatch) -> None:
-    """Replaces the version of the topic guardrail; the answer guardrail reads no topic."""
-    name, definition, examples = stack_guardrails.DENIED_TOPICS[0]
-    patch.setattr(
-        stack_guardrails,
-        "DENIED_TOPICS",
-        ((name, definition + " Changed.", examples), *stack_guardrails.DENIED_TOPICS[1:]),
-    )
-
-
-def question_topics_on(patch: pytest.MonkeyPatch) -> None:
-    """The stack of the first of the two deploys of 06.10.2026, the answer guardrail reading
-    the question's topics; from it to the stack as it is, the second replaces the versions of
-    the answer and the topic guardrail."""
-    patch.setattr(stack_guardrails, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
+    row = answer_models.REGIONS[REGION]
+    patch.setitem(answer_models.REGIONS, REGION, row._replace(grounding_threshold=0.75))
 
 
 def masking_changed(patch: pytest.MonkeyPatch) -> None:
@@ -413,7 +400,6 @@ def walk(before: Synthesised, after: Synthesised) -> tuple[list[list[str]], list
     ("change", "replaced"),
     [
         (threshold_changed, {"AnswerGuardrailVersion"}),
-        (topic_changed, {"TopicGuardrailVersion"}),
         (masking_changed, {"AnswerGuardrailVersion", "ExcerptGuardrailVersion"}),
     ],
 )
@@ -428,22 +414,6 @@ def test_every_step_of_a_new_guardrail_version_lets_old_and_new_answers_through(
         for version in current.versions
         if before.resources[version]["Properties"] != current.resources[version]["Properties"]
     } == replaced
-    orders, problems = walk(before, current)
-    assert orders
-    assert problems == []
-
-
-def test_the_second_deploy_of_the_question_check_lets_old_and_new_answers_through(
-    current: Synthesised,
-) -> None:
-    """From the first deploy, with the answer guardrail reading the question's topics, to the
-    second without them, as it is: two versions replaced, every step safe."""
-    before = synthesise(question_topics_on)
-    assert {
-        version
-        for version in current.versions
-        if before.resources[version]["Properties"] != current.resources[version]["Properties"]
-    } == {"AnswerGuardrailVersion", "TopicGuardrailVersion"}
     orders, problems = walk(before, current)
     assert orders
     assert problems == []
@@ -465,8 +435,7 @@ def test_the_deploy_of_this_change_lets_old_and_new_answers_through(
 def test_the_old_form_fails_the_same_walk(current: Synthesised) -> None:
     """The walk finds the 502 of 02.10.2026: with the role pinned to the version and no
     drain, the old function's call is refused, and its version is deleted while it runs. The
-    answer guardrail's version is replaced, as it was then; a changed topic no longer replaces
-    it."""
+    answer guardrail's version is replaced, as it was then."""
     before = as_deployed_until_now(synthesise(threshold_changed))
     _, problems = walk(before, as_deployed_until_now(current))
     assert any("the role refuses" in problem for problem in problems)
@@ -478,7 +447,7 @@ def test_the_role_names_no_guardrail_version(current: Synthesised) -> None:
     assert not depends_on(current.resources, current.role) & set(current.versions)
 
 
-@pytest.mark.parametrize("model_id", [ANSWER_MODEL_ID, REGIONAL_MODEL_ID])
+@pytest.mark.parametrize("model_id", [ANSWER_MODEL_ID, REGIONAL_MODEL_ID, PROFILE_MODEL_ID])
 def test_no_model_call_without_the_andur_answer_guardrail_is_allowed(model_id: str) -> None:
     """The proof that no answer comes without the guardrail: only a numbered version of the
     answer guardrail opens the model, through the EU profile or in the region."""
@@ -498,17 +467,16 @@ def test_no_model_call_without_the_andur_answer_guardrail_is_allowed(model_id: s
         None,  # no guardrail at all
         answer,  # the draft, which CloudFormation changes before it makes the version
         f"{answer}:DRAFT",  # the draft, should Bedrock name it with its suffix
-        f"{guardrail_arn('excerptguardrail')}:1",  # masks excerpts, checks no topic
-        f"{guardrail_arn('topicguardrail')}:1",  # checks topics, no grounding, no masking
+        f"{guardrail_arn('excerptguardrail')}:1",  # masks excerpts, no grounding
         f"{guardrail_arn('answerguardrailcopy')}:1",  # an id that starts the same
         f"{guardrail_arn('abcdef123456')}:1",  # any other guardrail in the account
         f"arn:aws:bedrock:{REGION}:444455556666:guardrail/answerguardrail:1",  # other account
-        f"arn:aws:bedrock:eu-central-1:{ACCOUNT}:guardrail/answerguardrail:1",  # other region
+        f"arn:aws:bedrock:eu-north-1:{ACCOUNT}:guardrail/answerguardrail:1",  # other region
     ):
         assert not allowed(refused), refused
 
 
-@pytest.mark.parametrize("model_id", [ANSWER_MODEL_ID, REGIONAL_MODEL_ID])
+@pytest.mark.parametrize("model_id", [ANSWER_MODEL_ID, REGIONAL_MODEL_ID, PROFILE_MODEL_ID])
 def test_no_policy_beside_the_role_s_own_allows_the_model(model_id: str) -> None:
     """The proof above reads the role's own policies; a policy attached from elsewhere (a
     later grant, a managed policy) would go round it, so there must be none that opens the
@@ -525,10 +493,20 @@ def test_no_policy_beside_the_role_s_own_allows_the_model(model_id: str) -> None
         assert not any(allows_invoke(statement) for statement in statements), logical_id
 
 
-def test_the_model_itself_opens_only_through_the_guarded_profile(current: Synthesised) -> None:
-    """The one other statement that allows InvokeModel on the answer model needs the profile,
-    and the profile needs the guardrail: there is no way round it."""
-    profile_statement, model_statement = invoke_statements(current.resources[current.role])
+def test_a_profile_model_opens_only_through_the_guarded_profile() -> None:
+    """With an answer model behind the EU profile, the one other statement that allows
+    InvokeModel on the model needs the profile, and the profile needs the guardrail: there is
+    no way round it. The third opens the topic model, which reads no answer."""
+    synthesised = synthesise(model_id=PROFILE_MODEL_ID)
+    statements = invoke_statements(synthesised.resources[synthesised.role])
+    by_sid = {statement["Sid"]: statement for statement in statements}
+    assert set(by_sid) == {
+        "InvokeAnswerModelProfile",
+        "InvokeAnswerModelInEurope",
+        "InvokeTopicModel",
+    }
+    profile_statement = by_sid["InvokeAnswerModelProfile"]
+    model_statement = by_sid["InvokeAnswerModelInEurope"]
     assert "bedrock:GuardrailIdentifier" in json.dumps(profile_statement["Condition"])
     assert model_statement["Condition"] == {
         "StringEquals": {"bedrock:InferenceProfileArn": profile_statement["Resource"]}
@@ -551,7 +529,7 @@ def test_a_deploy_that_replaces_no_version_does_not_wait(current: Synthesised) -
     deploys as fast as before."""
 
     def price_changed(patch: pytest.MonkeyPatch) -> None:
-        patch.setattr(answer_function, "PRICE_TOPIC_PER_1K_UNITS", "0.16")
+        patch.setattr(answer_function, "PRICE_PII_PER_1K_UNITS", "0.11")
 
     orders, problems = walk(synthesise(price_changed), current)
     assert orders == [[current.function]]

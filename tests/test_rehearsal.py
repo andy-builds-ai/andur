@@ -89,11 +89,10 @@ def test_every_command_runs_in_the_region_and_only_frankfurt_can_be_it(plan: lis
             assert command.count("--region") == 1, step.id
     sources = by_id(plan)["sources"].command or ()
     assert sources[sources.index("--retrieve-region") + 1] == REGION
-    # Behind CloudFront the address is worldwide: the address checks could never pass.
-    assert rehearsal.RUN_REGIONS == (REGION,)
+    # A region without a table has no stack to rehearse on.
     with pytest.raises(SystemExit):
         rehearsal.parse_args(["--workspace", "k", "--source", "s", "--question", "q",
-                              "--out-dir", "o", "--region", "eu-west-1"])  # fmt: skip
+                              "--out-dir", "o", "--region", "eu-west-2"])  # fmt: skip
 
 
 #: What each script that reads a stack's outputs must read, as its own parser gives it: Taug's
@@ -650,7 +649,7 @@ def test_the_deploy_time_reads_both_stacks(tmp_path: Path) -> None:
 RANGES = {
     "prefixes": [
         {"ip_prefix": "18.192.0.0/15", "region": "eu-central-1"},
-        {"ip_prefix": "52.95.0.0/16", "region": "eu-west-1"},
+        {"ip_prefix": "52.95.0.0/16", "region": "eu-west-3"},
     ],
     "ipv6_prefixes": [{"ipv6_prefix": "2a05:d014::/32", "region": "eu-central-1"}],
 }

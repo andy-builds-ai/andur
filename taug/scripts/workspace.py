@@ -52,7 +52,7 @@ from taug.scripts.layout import BUCKET_PREFIX, MAX_WORKSPACE_CHARACTERS, WORKSPA
 KEY_BYTES = 32
 
 #: What the SSM console shows next to the key. It names the header the function
-#: reads, ``X-Andur-Key``; CloudFront replaces ``Authorization`` on the way.
+#: reads, ``X-Andur-Key``, not ``Authorization`` (svar/app/README.md).
 KEY_DESCRIPTION = "Andur workspace key. Send it in the header X-Andur-Key."
 
 ADD_OUTPUTS = ("ApiKeyParameterPath",)

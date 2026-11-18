@@ -11,16 +11,9 @@ German, and whether an advice question is refused.
 Every question goes through `answer_question` in svar/app/answering.py, with the
 prompt, the guardrails and the cost line of the function. Probe guardrails
 are created in ``--region`` for the run and deleted after it, copies of the
-stack's: the answer guardrail (masking, grounding check), the topic guardrail
-(denied topics on the question and the answer) and the excerpt guardrail
-(masking). In a region whose stack checks the topics with a model
-(``--topics-tier model``, the default there; eu-central-1 since 07.10.2026) that model
-checks them, as the function does, and there is no topic probe. Elsewhere the
-topic probe uses the Classic tier and no guardrail profile by default, so
-nothing leaves the region; with ``--topics-tier standard`` the Standard tier
-and the EU profile, as deployed, and the answer probe through the profile only
-where the region's answer guardrail runs through it (not in eu-central-1).
-Retrieval runs once per question against the knowledge base in
+stack's: the answer guardrail (masking, grounding check) and the excerpt
+guardrail (masking). The region's topic model checks the denied topics, as the
+function does. Retrieval runs once per question against the knowledge base in
 ``--retrieve-region``, and every model gets the same passages.
 
 **What counts as added.** A model *adds* when what it wrote, before any
@@ -50,11 +43,9 @@ from typing import Any
 
 from svar.infra.answer_prompts import prompt_of
 from svar.infra.guardrails import (
-    ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
     EXCERPT_BLOCKED_MESSAGE,
-    GUARDRAIL_PROFILE_ID,
     MASKED_PII_TYPES,
     RELEVANCE_THRESHOLD,
     grounding_threshold_for,
@@ -74,13 +65,12 @@ from svar.scripts.evaluate import (
     load_questions,
     stays_in_the_eu,
 )
-from svar.scripts.topic_probe import create_probe, delete_reporting, topic_policy, wait_until_ready
+from svar.scripts.probe_guardrails import create_probe, delete_reporting, wait_until_ready
 from taug.infra.answer_models import (
-    FRANKFURT_MODELS,
+    DEFAULT_REGION,
     REGIONS,
     AnswerModel,
     answer_model,
-    region_answer_guardrail_uses_profile,
     region_models,
 )
 from taug.scripts import utf8_output
@@ -88,28 +78,16 @@ from taug.scripts.aws import AwsProblem, client
 
 QUESTIONS_FILE = Path(__file__).with_name("evaluation-questions-control.json")
 
-DEFAULT_REGION = "eu-central-1"
-
-MODELS = FRANKFURT_MODELS
-
 #: The probe guardrails, by the stack guardrail each one copies. The only guardrails this
 #: script creates or deletes.
 PROBE_NAMES = {
     "answer": "andur-control-answer-probe",
-    "topic": "andur-control-topic-probe",
     "excerpt": "andur-control-excerpt-probe",
 }
 
-#: How the topics are checked: a probe guardrail in the Classic tier without a profile, one in
-#: the Standard tier with the EU profile, or the region's topic model (taug/infra/answer_models.py),
-#: as the stack in that region checks them, with no topic probe guardrail at all.
-TIERS = ("classic", "standard", "model")
-
-
-def default_tier(region: str) -> str:
-    """The topic tier a run in ``region`` takes: the region's topic model, as its stack checks
-    the topics, or else Classic, which keeps every check in the region."""
-    return "model" if REGIONS.get(region) and REGIONS[region].topic_model_id else "classic"
+#: The options that pick what a run asks; ``--regrade`` marks every model and question of a
+#: saved run again and takes none of them.
+SELECTIONS = ("model", "only", "workspace")
 
 
 def load_control_questions(path: Path) -> list[dict[str, Any]]:
@@ -131,20 +109,9 @@ def load_control_questions(path: Path) -> list[dict[str, Any]]:
     return questions
 
 
-def probe_requests(
-    tier: str, answer_profile: bool = True, region: str = DEFAULT_REGION
-) -> dict[str, dict[str, Any]]:
-    """The CreateGuardrail request of each probe: the stack's guardrails in ``region``, with
-    its grounding threshold, the topics in ``tier``, with the EU profile only for the Standard
-    tier, which cannot go without one, and on the answer probe only where ``answer_profile``
-    (not in eu-central-1). With the topic model there is no topic probe, and the answer probe
-    reads no topics."""
-    cross_region = (
-        {"crossRegionConfig": {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID}}
-        if tier == "standard"
-        else {}
-    )
-    answer_cross_region = cross_region if answer_profile else {}
+def probe_requests(region: str = DEFAULT_REGION) -> dict[str, dict[str, Any]]:
+    """The CreateGuardrail request of each probe: the stack's two guardrails in ``region``,
+    with its grounding threshold, in the region."""
     masking = {
         "piiEntitiesConfig": [
             {
@@ -159,26 +126,11 @@ def probe_requests(
         ]
     }
 
-    def topics(on_answer: bool) -> dict[str, Any]:
-        """`DENIED_TOPICS` in this tier, read in the question and, if ``on_answer``, in the
-        answer too."""
-        policy = topic_policy()
-        policy["tierConfig"] = {"tierName": tier.upper()}
-        for topic in policy["topicsConfig"]:
-            topic["outputEnabled"] = on_answer
-            topic["outputAction"] = "BLOCK" if on_answer else "NONE"
-        return policy
-
     note = "Andur: temporary, svar/scripts/control_eval.py; deleted after the run."
-    requests = {
+    return {
         "answer": {
             "name": PROBE_NAMES["answer"],
             "description": note,
-            **(
-                {"topicPolicyConfig": topics(on_answer=False)}
-                if ANSWER_GUARDRAIL_READS_QUESTION_TOPICS and tier != "model"
-                else {}
-            ),
             "sensitiveInformationPolicyConfig": masking,
             "contextualGroundingPolicyConfig": {
                 "filtersConfig": [
@@ -192,15 +144,6 @@ def probe_requests(
             },
             "blockedInputMessaging": BLOCKED_INPUT_MESSAGE,
             "blockedOutputsMessaging": BLOCKED_OUTPUT_MESSAGE,
-            **answer_cross_region,
-        },
-        "topic": {
-            "name": PROBE_NAMES["topic"],
-            "description": note,
-            "topicPolicyConfig": topics(on_answer=True),
-            "blockedInputMessaging": BLOCKED_INPUT_MESSAGE,
-            "blockedOutputsMessaging": BLOCKED_OUTPUT_MESSAGE,
-            **cross_region,
         },
         "excerpt": {
             "name": PROBE_NAMES["excerpt"],
@@ -210,25 +153,21 @@ def probe_requests(
             "blockedOutputsMessaging": EXCERPT_BLOCKED_MESSAGE,
         },
     }
-    if tier == "model":
-        del requests["topic"]
-    return requests
 
 
 def settings_for(base: Any, model: AnswerModel, region: str, probes: Mapping[str, str]) -> Any:
     """The deployed settings with this model, its prompt wording and its token prices from the
-    table of ``region``, the region of the model and the probe guardrails (their drafts).
-    Without a topic probe the region's topic model checks the topics, at its price there. The
-    guardrail unit prices stay the deployed ones: the eu-central-1 price list gave the same
-    three (topic 0.15, PII 0.10, grounding 0.10 USD per 1,000 units) on 06.10.2026."""
-    topic_model_id = None if "topic" in probes else REGIONS[region].topic_model_id
-    topic_model = None if topic_model_id is None else answer_model(topic_model_id, region)
+    table of ``region``, the region of the model and the probe guardrails (their drafts). The
+    region's topic model checks the topics, at its price there. The guardrail unit prices stay
+    the deployed ones."""
+    topic_model_id = REGIONS[region].topic_model_id
+    topic_model = answer_model(topic_model_id, region)
     prices = dataclasses.replace(
         base.prices,
         input_tokens=Decimal(model.input_per_1k),
         output_tokens=Decimal(model.output_per_1k),
-        topic_model_input_tokens=Decimal(topic_model.input_per_1k if topic_model else 0),
-        topic_model_output_tokens=Decimal(topic_model.output_per_1k if topic_model else 0),
+        topic_model_input_tokens=Decimal(topic_model.input_per_1k),
+        topic_model_output_tokens=Decimal(topic_model.output_per_1k),
     )
     return dataclasses.replace(
         base,
@@ -239,8 +178,6 @@ def settings_for(base: Any, model: AnswerModel, region: str, probes: Mapping[str
         price_date=region_models(region).price_date,
         guardrail_id=probes["answer"],
         guardrail_version="DRAFT",
-        topic_guardrail_id=probes.get("topic"),
-        topic_guardrail_version="DRAFT" if "topic" in probes else None,
         topic_model_id=topic_model_id,
         excerpt_guardrail_id=probes["excerpt"],
         excerpt_guardrail_version="DRAFT",
@@ -291,14 +228,16 @@ def run_model(
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    """The command line; the topic tier defaults to the region's topic model, or to Classic
-    where the region has none, and both regions default to eu-central-1."""
+    """The command line; both regions default to `DEFAULT_REGION`. ``--regrade`` takes none
+    of `SELECTIONS`: it marks the whole saved run again."""
     parser = argparse.ArgumentParser(
         prog="python -m svar.scripts.control_eval",
         description="Measure how well answer models stay with their sources.",
     )
     parser.add_argument(
-        "--model", action="append", help="a model name from MODELS; default: all of them"
+        "--model",
+        action="append",
+        help="a model name from the table of --region; default: all of them",
     )
     parser.add_argument("--questions", type=Path, default=QUESTIONS_FILE)
     parser.add_argument("--only", action="append", help="ask only this question id (may repeat)")
@@ -317,20 +256,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=DEFAULT_REGION,
         help=f"the deployed function and its knowledge base; default {DEFAULT_REGION}",
     )
-    parser.add_argument(
-        "--topics-tier",
-        choices=TIERS,
-        help="classic: no guardrail profile, nothing leaves the region; standard: the EU "
-        "profile, as in eu-west-1; model: the region's topic model, as in eu-central-1. "
-        "Default: model where the region has a topic model, else classic",
-    )
     args = parser.parse_args(argv)
-    if args.topics_tier is None:
-        args.topics_tier = default_tier(args.region)
-    if args.topics_tier == "model" and not (
-        REGIONS.get(args.region) and REGIONS[args.region].topic_model_id
-    ):
-        parser.error(f"{args.region} has no topic model in taug/infra/answer_models.py")
+    if args.regrade:
+        given = [f"--{name}" for name in SELECTIONS if getattr(args, name)]
+        if given:
+            parser.error(
+                f"--regrade marks every model and question of the saved run again; "
+                f"{', '.join(given)} would be ignored"
+            )
     return args
 
 
@@ -342,6 +275,13 @@ def regrade(path: Path, questions_file: Path) -> int:
     questions = {q["id"]: q for q in load_control_questions(questions_file)}
     # A run saved before it named its region ran in the default one.
     region = data.get("region", DEFAULT_REGION)
+    if region not in REGIONS:
+        print(
+            f"error: {path} was run in {region}, which has no models in "
+            "taug/infra/answer_models.py; nothing was rewritten",
+            file=sys.stderr,
+        )
+        return 2
     by_name = {m.name: m for m in region_models(region).models}
     summaries = []
     for name, rows in data["runs"].items():
@@ -437,8 +377,7 @@ def main(argv: list[str] | None = None) -> int:
     started = time.strftime("%Y-%m-%dT%H:%M:%S")
     failed: AwsProblem | str | None = None
     try:
-        answer_profile = region_answer_guardrail_uses_profile(args.region)
-        for kind, request in probe_requests(args.topics_tier, answer_profile, args.region).items():
+        for kind, request in probe_requests(args.region).items():
             probes[kind] = create_probe(bedrock, request)
             progress(f"created {request['name']} ({probes[kind]})")
         for kind, guardrail_id in probes.items():
@@ -466,7 +405,6 @@ def main(argv: list[str] | None = None) -> int:
                 for kind, guardrail_id in probes.items()
             ]
         )
-    print(f"Topic tier of the probe guardrails: {args.topics_tier}.\n")
     for line in table(summaries):
         print(line)
     total = sum(s["cost_total"] for s in summaries)
@@ -496,7 +434,6 @@ def write(
                 "started": started,
                 "region": args.region,
                 "retrieve_region": args.retrieve_region,
-                "topics_tier": args.topics_tier,
                 "price_date": region_models(args.region).price_date,
                 "summaries": summaries,
                 "runs": runs,

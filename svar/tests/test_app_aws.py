@@ -151,14 +151,14 @@ def test_without_cloudfront_a_second_model_call_ends_inside_the_functions_time()
 def test_clients_get_their_service_limits_and_are_made_once() -> None:
     pytest.importorskip("boto3")
     for service, limits in aws.CLIENT_LIMITS.items():
-        made = aws.client(service, "us-east-1")
+        made = aws.client(service, "eu-central-1")
         assert made.meta.config.connect_timeout == limits.connect_timeout
         assert made.meta.config.read_timeout == limits.read_timeout
         assert made.meta.config.retries == {
             "mode": "standard",
             "total_max_attempts": limits.attempts,
         }
-        assert aws.client(service, "us-east-1") is made
+        assert aws.client(service, "eu-central-1") is made
         assert made.meta.service_model.service_name == aws.SERVICE_OF_CLIENT.get(service, service)
 
 
@@ -173,7 +173,7 @@ def test_a_missing_boto3_is_an_import_error(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(builtins, "__import__", without_boto3)
     with pytest.raises(ImportError):
-        aws.client("ssm", "us-east-1")
+        aws.client("ssm", "eu-central-1")
 
 
 def test_sdk_versions_name_boto3_and_botocore() -> None:

@@ -12,31 +12,15 @@ class AnswerModel(NamedTuple):
 
     name: str
     model_id: str
-    #: USD per 1,000 tokens, standard tier: in `ANSWER_MODELS` for eu-west-1, read on
-    #: `PRICE_DATE`; in `FRANKFURT_MODELS` for eu-central-1, read on `FRANKFURT_PRICE_DATE`.
+    #: USD per 1,000 tokens, standard tier, in eu-central-1, read on `FRANKFURT_PRICE_DATE`.
     input_per_1k: str
     output_per_1k: str
 
 
-#: AWS Price List API (the source of aws.amazon.com/bedrock/pricing), eu-west-1.
-#: An EU profile is billed at the "regional" price, not the global one.
-PRICE_DATE = "2026-09-28"
-
-ANSWER_MODELS = (
-    AnswerModel("Nemotron 3 Super", "nvidia.nemotron-super-3-120b", "0.00018", "0.00078"),
-    AnswerModel("Nova Pro", "eu.amazon.nova-pro-v1:0", "0.00092", "0.00368"),
-    AnswerModel("Nova 2 Lite", "eu.amazon.nova-2-lite-v1:0", "0.000374", "0.003157"),
-    AnswerModel(
-        "Claude Haiku 4.5", "eu.anthropic.claude-haiku-4-5-20251001-v1:0", "0.0011", "0.0055"
-    ),
-    AnswerModel("Claude Sonnet 4.6", "eu.anthropic.claude-sonnet-4-6", "0.0033", "0.0165"),
-)
-
-
-#: The candidates for a move to eu-central-1 (Frankfurt), priced there: the models that run in
-#: Frankfurt itself, and two behind the EU profile for comparison. AWS Price List API,
-#: eu-central-1, standard tier (effective 2026-10-01), read on `FRANKFURT_PRICE_DATE`; an EU
-#: profile is billed at the price of the region that calls it.
+#: The models priced in eu-central-1 (Frankfurt): the models that run in Frankfurt itself, and
+#: two behind the EU profile for comparison. AWS Price List API (the source of
+#: aws.amazon.com/bedrock/pricing), eu-central-1, standard tier (effective 2026-10-01), read on
+#: `FRANKFURT_PRICE_DATE`; an EU profile is billed at the price of the region that calls it.
 FRANKFURT_PRICE_DATE = "2026-10-06"
 
 FRANKFURT_MODELS = (
@@ -60,41 +44,15 @@ class RegionModels(NamedTuple):
     price_date: str
     models: tuple[AnswerModel, ...]
     answer_model_id: str
-    #: None: the topic guardrail checks the denied topics in the Standard tier, through the EU
-    #: guardrail profile, which carries the checks to six EU regions. A model id: that model
-    #: checks them in the region itself, and there is no topic guardrail.
-    topic_model_id: str | None
-    #: Whether the answer guardrail (masking, grounding) runs through the EU profile as well.
-    answer_guardrail_profile: bool
-    #: True: CloudFront is the one address of page and questions, at its edge locations
-    #: worldwide. False: the answer function's URL in the region is that address and serves the
-    #: page itself (svar/app/page.py); nothing of a request passes through another region.
-    behind_cloudfront: bool = True
-    #: The grounding threshold of the answer guardrail, measured for the region's answer
-    #: model; None: `GROUNDING_THRESHOLD` of the stack (0.7).
-    grounding_threshold: float | None = None
-
-
-def answer_guardrail_uses_profile(
-    answer_guardrail_profile: bool, topic_model_id: str | None
-) -> bool:
-    """Whether the answer guardrail runs through the EU profile: only where the topic guardrail
-    does too. A stack whose topics a model checks keeps every guardrail in its region, whatever
-    `answer_guardrail_profile` says. The stack and the probes ask this, so they agree."""
-    return answer_guardrail_profile and topic_model_id is None
-
-
-def region_answer_guardrail_uses_profile(region: str) -> bool:
-    """`answer_guardrail_uses_profile` for the stack of a region of `REGIONS`."""
-    models = region_models(region)
-    return answer_guardrail_uses_profile(models.answer_guardrail_profile, models.topic_model_id)
+    #: The model that checks the denied topics, in the region itself.
+    topic_model_id: str
+    #: The grounding threshold of the answer guardrail, measured for the region's answer model.
+    grounding_threshold: float
 
 
 #: The regions a stack may be deployed to. `cdk deploy -c region=<region>` and each script's
-#: `--region` pick one; without them it is `DEFAULT_REGION`. `control_eval`, `tool_probe`,
-#: `receiving_probe` and `rehearsal` carry eu-central-1 as a default of their own.
+#: `--region` pick one; without them it is `DEFAULT_REGION`.
 REGIONS = {
-    "eu-west-1": RegionModels(PRICE_DATE, ANSWER_MODELS, "eu.amazon.nova-pro-v1:0", None, True),
     # Everything stays in Frankfurt. The Standard topic tier, which reads German, goes only with
     # the EU profile (AWS refused it without one on 06.10.2026), so gpt-oss-120b checks the
     # topics in the region; gpt-oss-20b let advice questions through (docs/decisions.md).
@@ -106,13 +64,11 @@ REGIONS = {
         FRANKFURT_MODELS,
         "qwen.qwen3-235b-a22b-2507-v1:0",
         "openai.gpt-oss-120b-1:0",
-        False,
-        behind_cloudfront=False,
         grounding_threshold=0.8,
     ),
 }
 
-#: Frankfurt, where Svar runs (docs/decisions.md); Ireland takes `eu-west-1` by name.
+#: Frankfurt, where Svar runs (docs/decisions.md).
 DEFAULT_REGION = "eu-central-1"
 
 

@@ -18,13 +18,12 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from svar.scripts.topic_probe import (
-    TEXT_FIELDS,
+from svar.scripts.probe_guardrails import (
     THROTTLE_ATTEMPTS,
     THROTTLE_MAX_WAIT_SECONDS,
     THROTTLE_WAIT_SECONDS,
-    judged_text,
 )
+from svar.scripts.topic_probe import TEXT_FIELDS, judged_text
 from taug.infra.answer_models import answer_model
 from taug.scripts.aws import error_code
 
@@ -108,8 +107,8 @@ def measure(
     workers: int = DEFAULT_WORKERS,
     sleep: Callable[[float], None] = time.sleep,
 ) -> list[dict[str, Any]]:
-    """Every text through the topic model ``repeats`` times, rows shaped like
-    `topic_probe.measure`'s, with the failed checks, tokens and seconds of each text."""
+    """Every text through the topic model ``repeats`` times, rows as `topic_probe.summarise`
+    reads them, with the failed checks, tokens and seconds of each text."""
     field = TEXT_FIELDS[source]
     rows = [
         {
@@ -218,8 +217,8 @@ def report_model(summary: Mapping[str, Any]) -> list[str]:
 
 
 def main(args: Any, topic_model_id: str) -> int:
-    """`python -m svar.scripts.topic_probe` in a region whose stack checks the topics with a model:
-    the topic sets and the evaluation sets' questions, ``args.repeat`` times each."""
+    """`python -m svar.scripts.topic_probe`: the topic sets and the evaluation sets' questions
+    through the topic model, ``args.repeat`` times each."""
     from types import SimpleNamespace
 
     from svar.scripts.evaluate import deployed_environment, import_app
@@ -239,8 +238,6 @@ def main(args: Any, topic_model_id: str) -> int:
     try:
         if args.deployed:
             settings = app.config.load_settings(deployed_environment(args.region))
-            if not settings.topic_model_id:
-                raise AwsProblem("The deployed function checks the topics with a guardrail.")
         else:
             settings = SimpleNamespace(topic_model_id=topic_model_id, region=args.region)
         # Its price is needed for the report: a model without one stops the run before it pays.
@@ -271,10 +268,7 @@ def main(args: Any, topic_model_id: str) -> int:
         "EVALUATION": "Questions of the evaluation sets (control, Kalvenstett), as INPUT",
     }
     for name, title in titles.items():
-        # The guardrail's units line says nothing here: the model's tokens follow below.
-        lines = report(summaries[name], rows[name])
-        lines = [line for line in lines if not line.startswith("Units")]
-        print(f"## {title}", "", *lines, "", sep="\n")
+        print(f"## {title}", "", *report(summaries[name], rows[name]), "", sep="\n")
     print(*report_model(model), sep="\n")
     if args.out:
         args.out.write_text(

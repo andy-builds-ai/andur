@@ -4,11 +4,9 @@ Every answer of `ANSWERS_FILE` names its workspace, its question and whether
 the sources carry it. The passages come from the deployed knowledge base the
 way the function retrieves them and are built into the sources text the model
 call is checked against. The check runs in a guardrail of its own,
-`PROBE_NAME`, a copy of the answer guardrail: the same topics on the question
-while the stack sets them there (none since the second deploy of 06.10.2026),
-masking, grounding and relevance thresholds, and the EU guardrail profile
-where the stack of the region uses it (not in eu-central-1). Each answer is
-checked as written, the way the model call checks it.
+`PROBE_NAME`, a copy of the answer guardrail of the region: masking, grounding
+and relevance thresholds, in the region. Each answer is checked as written,
+the way the model call checks it.
 
 A German answer that check withholds is also checked in English: translated by
 the answer model through the probe, and the translation checked on the same
@@ -32,19 +30,15 @@ from pathlib import Path
 from typing import Any
 
 from svar.infra.guardrails import (
-    ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
-    GUARDRAIL_PROFILE_ID,
-    GUARDRAIL_PROFILE_REGIONS,
     MASKED_PII_TYPES,
     RELEVANCE_THRESHOLD,
     grounding_threshold_for,
 )
-from svar.scripts import topic_probe
+from svar.scripts import probe_guardrails
 from svar.scripts.evaluate import deployed_environment, import_app
 from taug.access.workspaces import keep_workspace
-from taug.infra.answer_models import region_answer_guardrail_uses_profile
 from taug.scripts import utf8_output
 from taug.scripts.aws import REGION, AwsProblem, client, error_code
 
@@ -106,26 +100,10 @@ def load_answers(path: Path) -> list[dict[str, Any]]:
 
 def probe_request(region: str = REGION) -> dict[str, Any]:
     """The probe guardrail: the answer guardrail's policies as the stack in ``region`` sets
-    them, read on the same sides, under the probe's name; through the EU profile only where
-    that stack's guardrails use it."""
-    profile = region_answer_guardrail_uses_profile(region)
-    topics = topic_probe.topic_policy()
-    for topic in topics["topicsConfig"]:
-        topic["outputEnabled"] = False
-        topic["outputAction"] = "NONE"
+    them, read on the same sides, under the probe's name, in the region."""
     return {
         "name": PROBE_NAME,
         "description": "Andur: temporary copy of the answer guardrail; deleted after the run.",
-        **(
-            {"topicPolicyConfig": topics}
-            if ANSWER_GUARDRAIL_READS_QUESTION_TOPICS and profile
-            else {}
-        ),
-        **(
-            {"crossRegionConfig": {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID}}
-            if profile
-            else {}
-        ),
         "sensitiveInformationPolicyConfig": {
             "piiEntitiesConfig": [
                 {
@@ -159,16 +137,20 @@ def probe_request(region: str = REGION) -> dict[str, Any]:
 
 
 def retrying(call: Callable[[], Any], sleep: Callable[[float], None] = time.sleep) -> Any:
-    """One AWS call, asked again after a wait while AWS throttles it, as `topic_probe` does."""
-    for attempt in range(1, topic_probe.THROTTLE_ATTEMPTS + 1):
+    """One AWS call, asked again after a wait while AWS throttles it, as `probe_guardrails`
+    does."""
+    for attempt in range(1, probe_guardrails.THROTTLE_ATTEMPTS + 1):
         try:
             return call()
         except Exception as exc:
-            if error_code(exc) != "ThrottlingException" or attempt == topic_probe.THROTTLE_ATTEMPTS:
+            if (
+                error_code(exc) != "ThrottlingException"
+                or attempt == probe_guardrails.THROTTLE_ATTEMPTS
+            ):
                 raise
             ceiling = min(
-                topic_probe.THROTTLE_MAX_WAIT_SECONDS,
-                topic_probe.THROTTLE_WAIT_SECONDS * 2 ** (attempt - 1),
+                probe_guardrails.THROTTLE_MAX_WAIT_SECONDS,
+                probe_guardrails.THROTTLE_WAIT_SECONDS * 2 ** (attempt - 1),
             )
             sleep(random.uniform(ceiling / 2, ceiling))
     raise AssertionError("unreachable: the last attempt returns or raises")
@@ -553,15 +535,9 @@ def main(argv: list[str] | None = None) -> int:
     utf8_output()
     args = parse_args(argv)
     try:
-        profile = region_answer_guardrail_uses_profile(args.region)
+        grounding_threshold_for(args.region)
     except KeyError as problem:
         print(f"error: {problem.args[0]}", file=sys.stderr)
-        return 2
-    if profile and args.region not in GUARDRAIL_PROFILE_REGIONS:
-        print(
-            f"error: {args.region} is not a source region of {GUARDRAIL_PROFILE_ID}",
-            file=sys.stderr,
-        )
         return 2
     answers = load_answers(args.answers)
     app = import_app()
@@ -576,18 +552,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         bedrock = client("bedrock", args.region)
         runtime = client("bedrock-runtime", args.region)
-        guardrail_id = topic_probe.create_probe(bedrock, probe_request(args.region))
+        guardrail_id = probe_guardrails.create_probe(bedrock, probe_request(args.region))
         progress(f"created {PROBE_NAME} ({guardrail_id})")
         try:
-            topic_probe.wait_until_ready(bedrock, guardrail_id, name=PROBE_NAME)
+            probe_guardrails.wait_until_ready(bedrock, guardrail_id, name=PROBE_NAME)
             settings = dataclasses.replace(
                 deployed, guardrail_id=guardrail_id, guardrail_version="DRAFT"
             )
             rows = measure(app, runtime, settings, answers, sources, progress, args.workers)
         except BaseException:
-            topic_probe.delete_reporting(bedrock, guardrail_id, progress, PROBE_NAME)
+            probe_guardrails.delete_reporting(bedrock, guardrail_id, progress, PROBE_NAME)
             raise
-        deleted = topic_probe.delete_reporting(bedrock, guardrail_id, progress, PROBE_NAME)
+        deleted = probe_guardrails.delete_reporting(bedrock, guardrail_id, progress, PROBE_NAME)
     except (AwsProblem, app.errors.HandlerError) as problem:
         print(f"error: {problem}", file=sys.stderr)
         return 2

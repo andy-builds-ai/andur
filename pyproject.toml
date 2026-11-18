@@ -14,8 +14,7 @@ license-files = ["LICENSE"]
 classifiers = ["Private :: Do Not Upload"]
 # The ranges say what the code needs; constraints.txt pins the exact versions it is tested on.
 dependencies = [
-    # From 2.273.0 the CloudFront origin grants lambda:InvokeFunction itself, which the stack
-    # test counts.
+    # The version the stack tests pass on (constraints.txt).
     "aws-cdk-lib>=2.273.0",
     "constructs>=10.0.0,<11.0.0",
     # Used by the scripts only (scripts/ and each part's scripts/), and imported lazily there.

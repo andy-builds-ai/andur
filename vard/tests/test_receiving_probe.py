@@ -394,7 +394,7 @@ def test_an_out_file_that_goes_bad_during_the_run_keeps_the_tables_and_pays_no_m
 
 
 def test_a_region_outside_the_eu_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
-    assert probe.main(["--region", "us-east-1"]) == 2
+    assert probe.main(["--region", "us-west-2"]) == 2
     assert "not an EU region" in capsys.readouterr().err
 
 
@@ -417,14 +417,15 @@ def test_another_region_measures_its_own_models_at_its_own_prices(
     capsys: pytest.CaptureFixture[str],
     loaded: tuple[dict[str, str], list[dict[str, Any]]],
 ) -> None:
-    from taug.infra.answer_models import ANSWER_MODELS
+    from taug.infra.answer_models import REGIONS, AnswerModel
 
     monkeypatch.setattr(probe, "model_client", lambda region, read_seconds: Clerk(loaded[1]))
-    nova = next(m for m in ANSWER_MODELS if m.name == "Nova Pro")
-    assert probe.main(["--region", "eu-west-1", "--model", "Nova Pro"]) == 0
+    nova = AnswerModel("Nova Pro", "eu.amazon.nova-pro-v1:0", "0.002", "0.008")
+    monkeypatch.setitem(REGIONS, "eu-test-1", REGIONS["eu-central-1"]._replace(models=(nova,)))
+    assert probe.main(["--region", "eu-test-1", "--model", "Nova Pro"]) == 0
     case_cost = 3 * (1000 * Decimal(nova.input_per_1k) + 100 * Decimal(nova.output_per_1k)) / 1000
     assert f"| p1 | 1 | yes | 3 | 0 | {case_cost:.5f} |" in capsys.readouterr().out
-    assert probe.main(["--region", "eu-west-1", "--model", "gpt-oss-120b"]) == 2
+    assert probe.main(["--region", "eu-test-1", "--model", "gpt-oss-120b"]) == 2
     assert probe.main(["--region", "eu-north-1"]) == 2
     assert "has no models" in capsys.readouterr().err
 

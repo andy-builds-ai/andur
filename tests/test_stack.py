@@ -17,7 +17,7 @@ import aws  # svar/app/aws.py, imported by its Lambda name (conftest.py)
 # Imported, not skipped past. `aws-cdk-lib` is a hard dependency in
 # pyproject.toml, and it has to stay one: with an `importorskip` here, an
 # environment without the CDK reported "passed" for this whole module — over
-# sixty assertions about the stack, IAM, CloudFront and the page gone without
+# sixty assertions about the stack, IAM and the page gone without
 # a red line anywhere. A missing dependency is a broken environment and has
 # to look like one.
 import aws_cdk as cdk
@@ -29,7 +29,7 @@ import sentences
 from aws_cdk.assertions import Match, Template
 
 from svar.app.denied_topics import DENIED_TOPICS
-from svar.app.page import ASK_PATH, HSTS_MAX_AGE_DAYS
+from svar.app.page import ASK_PATH, HSTS_MAX_AGE_DAYS, ROOT_DOCUMENT, SECURITY_HEADERS
 from svar.infra.answer_function import (
     ANSWER_FUNCTION_NAME,
     ANSWER_MAX_CONCURRENCY,
@@ -48,26 +48,20 @@ from svar.infra.answer_function import (
     PRICE_OUTPUT_PER_1K_TOKENS,
     PRICE_PII_PER_1K_UNITS,
     PRICE_TOPIC_PER_1K_UNITS,
+    WEB_FOLDER,
 )
 from svar.infra.guardrails import (
-    ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
     EXCERPT_GUARDRAIL_NAME,
-    GROUNDING_THRESHOLD,
     GUARDRAIL_NAME,
-    GUARDRAIL_PROFILE_ID,
-    GUARDRAIL_PROFILE_REGIONS,
     MASKED_PII_TYPES,
     RELEVANCE_THRESHOLD,
-    TOPIC_GUARDRAIL_NAME,
-    TOPICS_TIER,
 )
 from svar.infra.stack import SvarStack
-from svar.infra.web import ORIGIN_RESPONSE_TIMEOUT_SECONDS, SITE_ROOT_DOCUMENT, WEB_FOLDER
-from svar.scripts import ask, grounding_probe, topic_probe
+from svar.scripts import ask, grounding_probe
 from taug.infra import answer_models
-from taug.infra.answer_models import PRICE_DATE, answer_model
+from taug.infra.answer_models import FRANKFURT_PRICE_DATE, answer_model
 from taug.infra.keys import API_KEY_PARAMETER_PATH
 from taug.infra.knowledge_base import (
     CHUNK_MAX_TOKENS,
@@ -108,14 +102,13 @@ def test_the_cdk_cli_telemetry_stays_off_for_every_run_from_the_repository() -> 
     assert deploy_context()["cli-telemetry"] is False
 
 
-#: The region a test stack is built for when it names none: Ireland, the one region whose stack
-#: has CloudFront, the topic guardrail and the EU profile, which this module checks. Frankfurt's
-#: stack is checked in svar/tests/test_regions.py.
-TEST_REGION = "eu-west-1"
+#: The region a test stack is built for when it names none: Frankfurt, where Svar runs.
+TEST_REGION = "eu-central-1"
 
-#: Ireland's row of the model table, and its answer model with its prices there.
-IRELAND = answer_models.REGIONS[TEST_REGION]
-IRELAND_MODEL = answer_model(IRELAND.answer_model_id, TEST_REGION)
+#: Frankfurt's row of the model table, and its answer and topic models with their prices there.
+FRANKFURT = answer_models.REGIONS[TEST_REGION]
+FRANKFURT_MODEL = answer_model(FRANKFURT.answer_model_id, TEST_REGION)
+TOPIC_MODEL = answer_model(FRANKFURT.topic_model_id, TEST_REGION)
 
 
 def andur_stacks(app: cdk.App, construct_id: str, **settings: Any) -> tuple[TaugStack, SvarStack]:
@@ -199,35 +192,13 @@ def joined_last_part(value: Mapping[str, Any]) -> str:
     return value["Fn::Join"][1][-1]
 
 
-def profile_arn(region: Any) -> dict[str, Any]:
-    """The EU guardrail profile in ``region`` as CloudFormation renders it."""
-    middle = [":bedrock:", region, ":"] if isinstance(region, dict) else [f":bedrock:{region}:"]
-    return {
-        "Fn::Join": [
-            "",
-            [
-                "arn:",
-                {"Ref": "AWS::Partition"},
-                *middle,
-                {"Ref": "AWS::AccountId"},
-                f":guardrail-profile/{GUARDRAIL_PROFILE_ID}",
-            ],
-        ]
-    }
-
-
 # --- Documents bucket ----------------------------------------------------
 
 
 def documents_bucket(stack: SvarStack, template: Template) -> Mapping[str, Any]:
-    """The documents bucket itself, not whichever bucket happens to match.
-
-    The stack has two: the documents bucket and the private site bucket.
-    ``has_resource_properties`` is happy as soon as one resource of the type
-    fits, so with it these three promises were kept by the site bucket while
-    the documents bucket could have lost all of them — and the documents are
-    the one thing here that cannot be rebuilt from anything else.
-    """
+    """The documents bucket itself, by its construct, not whichever bucket happens to match:
+    ``has_resource_properties`` is happy as soon as one resource of the type fits, and the
+    documents are the one thing here that cannot be rebuilt from anything else."""
     return resource_of(stack, template, stack.documents_bucket)["Properties"]
 
 
@@ -270,13 +241,11 @@ def test_documents_and_their_policy_survive_stack_deletion(
     assert policy["DeletionPolicy"] == "Retain"
 
 
-def test_the_page_and_its_bucket_go_with_the_stack(stack: SvarStack, template: Template) -> None:
-    """Every file in it is a copy of web/ in the repository, so nothing is lost."""
-    assert resource_of(stack, template, stack.site_bucket)["DeletionPolicy"] == "Delete"
-    # Without this the bucket would still hold the page and refuse to be deleted.
-    copier = only_resource(template, "Custom::CDKBucketDeployment")
-    assert copier["Properties"]["RetainOnDelete"] is False
-    assert copier["Properties"]["Prune"] is True
+def test_the_page_goes_with_the_stack(stack: SvarStack, template: Template) -> None:
+    """Every file of its layer is a copy of web/ in the repository, so nothing is lost."""
+    layer = resource_of(stack, template, stack.page_layer)
+    assert layer.get("DeletionPolicy", "Delete") == "Delete"
+    assert template.find_resources("AWS::S3::Bucket") == {}
 
 
 def test_derived_data_is_deleted_with_the_stack(taug_template: Template) -> None:
@@ -503,13 +472,10 @@ def all_policy_statements(template: Template) -> list[tuple[str, dict[str, Any]]
 def test_the_only_wildcard_resources_are_model_listing_and_cache_clearing(
     template: Template, taug_template: Template
 ) -> None:
-    """Two actions that cannot be scoped; nothing else gets to use that excuse.
+    """One action that cannot be scoped; nothing else gets to use that excuse.
 
-    ``bedrock:ListFoundationModels`` takes no resource at all. CloudFront
-    invalidation is CDK's: the file copier clears the caches after an upload,
-    and the role that does it is built by the construct, which grants the two
-    invalidation actions on ``*``. Narrowing that would mean replacing the
-    construct. Nothing in this stack's own roles is on a wildcard.
+    ``bedrock:ListFoundationModels`` takes no resource at all. Nothing in the stacks' own
+    roles is on a wildcard.
     """
     wildcard_actions = [
         sorted(action) if isinstance(action, list) else [action]
@@ -525,23 +491,19 @@ def test_the_only_wildcard_resources_are_model_listing_and_cache_clearing(
     # Sorted, because the order inside one statement is the renderer's:
     # ``@aws-cdk/aws-iam:minimizePolicies`` in cdk.json merges statements and
     # decides for itself in which order the actions end up.
-    assert sorted(wildcard_actions) == [
-        ["bedrock:ListFoundationModels"],
-        ["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"],
-    ]
+    assert sorted(wildcard_actions) == [["bedrock:ListFoundationModels"]]
 
 
 def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
     stack: SvarStack, template: Template, taug_stack: TaugStack, taug_template: Template
 ) -> None:
-    """Known exceptions: all three belong to functions CDK generates for a deploy.
+    """Known exceptions: both belong to functions CDK generates for a deploy.
 
-    One is the key retirer's, which no resource calls any more, one runs the
-    deploy drain, the third copies web/ into the site bucket.
-    Each gets AWSLambdaBasicExecutionRole from its construct; this stack does
+    One is the key retirer's, which no resource calls any more, the other runs the
+    deploy drain. Each gets AWSLambdaBasicExecutionRole from its construct; this stack does
     not create these roles and cannot narrow them without replacing the
     constructs. Every role the stack defines itself carries inline policies
-    only, and all three of these run during a deploy and never afterwards.
+    only, and both of these run during a deploy and never afterwards.
     """
 
     def framework_role(owner: Any, provider: str) -> Any:
@@ -552,7 +514,6 @@ def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
         for owner, role in [
             (taug_stack, framework_role(taug_stack, "ApiKeyProvider")),
             (stack, framework_role(stack, "DeployDrainProvider")),
-            (stack, stack.site_files.handler_role),
         ]
     }
     with_managed = {
@@ -605,14 +566,13 @@ def test_role_can_only_be_assumed_by_bedrock_in_this_account(
 def test_the_only_compute_that_runs_between_deploys_is_the_answer_function(
     stack: SvarStack, template: Template, taug_template: Template
 ) -> None:
-    """Six functions, and five of them only ever run during a deploy.
+    """Five functions, and four of them only ever run during a deploy.
 
-    The answer function, the retired key function and the deploy drain, each with
-    the CDK framework that runs it, and CDK's file copier that puts web/ into the
-    site bucket. Nothing else runs, so nothing else can cost money while nobody
-    asks.
+    The answer function, the retired key function and the deploy drain, each of the two
+    with the CDK framework that runs it. Nothing else runs, so nothing else can cost money
+    while nobody asks.
     """
-    template.resource_count_is("AWS::Lambda::Function", 4)
+    template.resource_count_is("AWS::Lambda::Function", 3)
     taug_template.resource_count_is("AWS::Lambda::Function", 2)
     functions = template.find_resources("AWS::Lambda::Function")
     assert stack.get_logical_id(stack.answer_function.node.default_child) in functions
@@ -632,7 +592,13 @@ def test_stacks_publish_what_later_steps_need(template: Template, taug_template:
         "KnowledgeBaseRoleArn",
         "ApiKeyParameterPath",
     } <= set(taug_template.find_outputs("*"))
-    assert {"FunctionUrl", "WebUrl", "BudgetTableName"} <= set(template.find_outputs("*"))
+    assert set(template.find_outputs("*")) == {
+        "WebUrl",
+        "GuardrailVersion",
+        "ExcerptGuardrailRef",
+        "TopicModelId",
+        "BudgetTableName",
+    }
 
 
 def test_vector_bucket_output_is_a_name_not_an_arn(taug_template: Template) -> None:
@@ -670,46 +636,33 @@ def test_timeouts_nest_from_aws_calls_to_function_to_ask_script() -> None:
     three times, for the topic checks of the question and the answer and for the
     excerpts.
     """
-    assert aws.worst_case_seconds() == 189
-    assert aws.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < ask.HTTP_TIMEOUT_SECONDS < 900
+    assert aws.worst_case_seconds(behind_cloudfront=False) == 190
+    assert (
+        aws.worst_case_seconds(behind_cloudfront=False)
+        < ANSWER_TIMEOUT_SECONDS
+        < ask.HTTP_TIMEOUT_SECONDS
+        < 900
+    )
 
 
-def test_cloudfront_gives_up_before_the_function_does() -> None:
-    """The one layer that does not nest, and knowingly so.
-
-    CloudFront may wait 120 seconds without an approved quota increase, and
-    the function may run 195. An answer between the two reaches the browser as
-    CloudFront's 504 while the function runs it to the end and charges the
-    question. An answer takes seconds (0.7 to 4.4 inside the function with Nova
-    Pro on 28.09.2026), so the gap is a corner, not a case — and the
-    alternative, a shorter function timeout, would cut off answers that are
-    merely slow.
-    """
-    assert ORIGIN_RESPONSE_TIMEOUT_SECONDS < ANSWER_TIMEOUT_SECONDS
-    assert aws.ORIGIN_TIMEOUT_SECONDS == ORIGIN_RESPONSE_TIMEOUT_SECONDS
-    assert ORIGIN_RESPONSE_TIMEOUT_SECONDS < aws.worst_case_seconds()
-
-
-def test_without_cloudfront_every_caller_outlasts_the_function() -> None:
-    """Where the function is its own address, the page and svar/scripts/ask.py wait longer than
-    the function may run: the function's own timeout is the limit svar/app/aws.py counts with,
+def test_every_caller_outlasts_the_function() -> None:
+    """The function is its own address: the page and svar/scripts/ask.py wait longer than the
+    function may run, so the function's own timeout is the limit svar/app/aws.py counts with,
     and the worst case still ends inside it, as a 502 with a reason."""
-    from svar.scripts import ask
-
     assert aws.PAGE_TIMEOUT_SECONDS * 1000 == page_number("REQUEST_TIMEOUT_MS")
     assert aws.FUNCTION_TIMEOUT_SECONDS == ANSWER_TIMEOUT_SECONDS
     assert aws.PAGE_TIMEOUT_SECONDS > ANSWER_TIMEOUT_SECONDS
     assert ask.HTTP_TIMEOUT_SECONDS > ANSWER_TIMEOUT_SECONDS
     assert aws.caller_deadline_seconds(behind_cloudfront=False) == ANSWER_TIMEOUT_SECONDS
-    assert aws.worst_case_seconds(behind_cloudfront=False) < ANSWER_TIMEOUT_SECONDS
 
 
 def test_answer_function_runs_at_most_a_few_requests_at_once(
     stack: SvarStack, template: Template
 ) -> None:
-    """The hard cap on Lambda time and model calls behind an address anyone may find."""
+    """The hard cap on Lambda time and model calls behind an address anyone may find: five
+    questions, and room for one page load beside them."""
     properties = resource_of(stack, template, stack.answer_function)["Properties"]
-    assert properties["ReservedConcurrentExecutions"] == ANSWER_MAX_CONCURRENCY == 5
+    assert properties["ReservedConcurrentExecutions"] == ANSWER_MAX_CONCURRENCY + 5 == 10
 
 
 def test_answer_function_is_configured_only_through_its_environment(
@@ -722,8 +675,9 @@ def test_answer_function_is_configured_only_through_its_environment(
         "KNOWLEDGE_BASE_ID": imported(
             taug_stack, taug_template, taug_stack.knowledge_base, "KnowledgeBaseId"
         ),
-        "MODEL_ID": IRELAND.answer_model_id,
-        "ANSWER_PROMPT": "sentence-first",
+        "PAGE_FOLDER": "/opt",
+        "MODEL_ID": FRANKFURT.answer_model_id,
+        "ANSWER_PROMPT": "each-part",
         "REGION": {"Ref": "AWS::Region"},
         "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
         "API_KEY_PARAMETER_PATH": API_KEY_PARAMETER_PATH,
@@ -735,18 +689,20 @@ def test_answer_function_is_configured_only_through_its_environment(
         "GUARDRAIL_VERSION": get_att(stack, stack.guardrail_version, "Version"),
         "EXCERPT_GUARDRAIL_ID": get_att(stack, stack.excerpt_guardrail_version, "GuardrailId"),
         "EXCERPT_GUARDRAIL_VERSION": get_att(stack, stack.excerpt_guardrail_version, "Version"),
-        "TOPIC_GUARDRAIL_ID": get_att(stack, stack.topic_guardrail_version, "GuardrailId"),
-        "TOPIC_GUARDRAIL_VERSION": get_att(stack, stack.topic_guardrail_version, "Version"),
-        "PRICE_INPUT_PER_1K_TOKENS": IRELAND_MODEL.input_per_1k,
-        "PRICE_OUTPUT_PER_1K_TOKENS": IRELAND_MODEL.output_per_1k,
+        "TOPIC_MODEL_ID": TOPIC_MODEL.model_id,
+        "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS": TOPIC_MODEL.input_per_1k,
+        "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": TOPIC_MODEL.output_per_1k,
+        "PRICE_INPUT_PER_1K_TOKENS": FRANKFURT_MODEL.input_per_1k,
+        "PRICE_OUTPUT_PER_1K_TOKENS": FRANKFURT_MODEL.output_per_1k,
         "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
         "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
         "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
-        "PRICE_DATE": PRICE_DATE,
+        "PRICE_DATE": FRANKFURT_PRICE_DATE,
     }
     assert set(variables) == {
         *config.ENVIRONMENT_VARIABLES.values(),
-        *config.TOPIC_GUARDRAIL_VARIABLES.values(),
+        *config.TOPIC_MODEL_VARIABLES.values(),
+        *config.PAGE_VARIABLES.values(),
         config.ANSWER_PROMPT_VARIABLE,
     }
 
@@ -782,43 +738,40 @@ def test_answer_role_has_five_policies_on_named_resources(
         taug_stack, taug_template, taug_stack.knowledge_base, "KnowledgeBaseArn"
     )
 
-    # Ireland's model is an EU profile: the profile needs the guardrail, the
-    # model behind it needs the profile.
-    profile, model, apply_guardrail = policies["InvokeAnswerModel"]["Statement"]
-    assert profile["Action"] == model["Action"] == "bedrock:InvokeModel"
-    assert joined_last_part(profile["Resource"]) == f":inference-profile/{IRELAND.answer_model_id}"
-    assert model["Resource"] == {
-        "Fn::Join": [
-            "",
-            [
-                "arn:",
-                {"Ref": "AWS::Partition"},
-                ":bedrock:eu-*::foundation-model/" + IRELAND.answer_model_id.removeprefix("eu."),
-            ],
-        ]
+    # Frankfurt's model runs in the region: invoked directly, only with the answer guardrail.
+    statements = {s["Sid"]: s for s in policies["InvokeAnswerModel"]["Statement"]}
+    assert set(statements) == {
+        "InvokeAnswerModelStatement",
+        "ApplyAnswerGuardrail",
+        "InvokeTopicModel",
     }
-    assert model["Condition"] == {
-        "StringEquals": {"bedrock:InferenceProfileArn": profile["Resource"]}
-    }
+    invoke = statements["InvokeAnswerModelStatement"]
+    assert invoke["Action"] == "bedrock:InvokeModel"
+    assert joined_last_part(invoke["Resource"]) == (
+        f"::foundation-model/{FRANKFURT.answer_model_id}"
+    )
     # Only through a numbered version of the answer guardrail: <guardrail arn>:<number>, never
     # the draft. What that allows and refuses, step by step through a deploy:
     # svar/tests/test_deploy_steps.py.
-    assert profile["Condition"] == guarded_by(stack)
-    # The answer and topic guardrails run through the EU profile: the profile in every
-    # region it routes to, and in none outside the EU.
-    # The CDK sorts the resources of a statement; compared without order.
+    assert invoke["Condition"] == guarded_by(stack)
+    apply_guardrail = statements["ApplyAnswerGuardrail"]
     assert apply_guardrail["Action"] == "bedrock:ApplyGuardrail"
+    # The CDK sorts the resources of a statement; compared without order.
     assert sorted(map(json.dumps, apply_guardrail["Resource"])) == sorted(
         map(
             json.dumps,
             [
                 get_att(stack, stack.guardrail, "GuardrailArn"),
                 get_att(stack, stack.excerpt_guardrail, "GuardrailArn"),
-                get_att(stack, stack.topic_guardrail, "GuardrailArn"),
-                *(profile_arn(region) for region in GUARDRAIL_PROFILE_REGIONS),
             ],
         )
     )
+    topic = statements["InvokeTopicModel"]
+    assert topic["Action"] == "bedrock:InvokeModel"
+    assert joined_last_part(topic["Resource"]) == (
+        f":bedrock:{TEST_REGION}::foundation-model/{FRANKFURT.topic_model_id}"
+    )
+    assert "Condition" not in topic
 
     (write_logs,) = policies["WriteLogs"]["Statement"]
     assert sorted(write_logs["Action"]) == ["logs:CreateLogStream", "logs:PutLogEvents"]
@@ -847,16 +800,46 @@ def test_a_model_in_the_region_is_invoked_directly_with_its_own_prices() -> None
     _, stack = andur_stacks(app, "RegionalModelStack", answer_model_id=REGIONAL_MODEL_ID)
     template = Template.from_stack(stack)
     policies = role_policies(stack, template, stack.answer_role)
-    invoke, apply_guardrail = policies["InvokeAnswerModel"]["Statement"]
+    statements = {s["Sid"]: s for s in policies["InvokeAnswerModel"]["Statement"]}
+    invoke = statements["InvokeAnswerModelStatement"]
 
     assert invoke["Action"] == "bedrock:InvokeModel"
     assert joined_last_part(invoke["Resource"]) == f"::foundation-model/{REGIONAL_MODEL_ID}"
     assert invoke["Condition"] == guarded_by(stack)
-    assert apply_guardrail["Action"] == "bedrock:ApplyGuardrail"
+    assert statements["ApplyAnswerGuardrail"]["Action"] == "bedrock:ApplyGuardrail"
     variables = resource_of(stack, template, stack.answer_function)["Properties"]["Environment"]
     assert variables["Variables"]["MODEL_ID"] == REGIONAL_MODEL_ID
     assert variables["Variables"]["PRICE_INPUT_PER_1K_TOKENS"] == "0.00018"
     assert variables["Variables"]["PRICE_OUTPUT_PER_1K_TOKENS"] == "0.00078"
+
+
+def test_a_model_behind_the_eu_profile_is_invoked_through_it() -> None:
+    """An answer model of the table with an ``eu.`` id: the profile needs the guardrail, the
+    model behind it needs the profile."""
+    profile_model = answer_model("eu.amazon.nova-pro-v1:0")
+    app = cdk.App(context=deploy_context())
+    _, stack = andur_stacks(app, "ProfileModelStack", answer_model_id=profile_model.model_id)
+    template = Template.from_stack(stack)
+    policies = role_policies(stack, template, stack.answer_role)
+    statements = {s["Sid"]: s for s in policies["InvokeAnswerModel"]["Statement"]}
+    profile = statements["InvokeAnswerModelProfile"]
+    model = statements["InvokeAnswerModelInEurope"]
+    assert profile["Action"] == model["Action"] == "bedrock:InvokeModel"
+    assert joined_last_part(profile["Resource"]) == f":inference-profile/{profile_model.model_id}"
+    assert model["Resource"] == {
+        "Fn::Join": [
+            "",
+            [
+                "arn:",
+                {"Ref": "AWS::Partition"},
+                ":bedrock:eu-*::foundation-model/" + profile_model.model_id.removeprefix("eu."),
+            ],
+        ]
+    }
+    assert model["Condition"] == {
+        "StringEquals": {"bedrock:InferenceProfileArn": profile["Resource"]}
+    }
+    assert profile["Condition"] == guarded_by(stack)
 
 
 def test_a_model_without_a_price_does_not_synthesise() -> None:
@@ -881,27 +864,12 @@ def test_the_default_model_carries_its_own_prices() -> None:
 def test_account_wide_names_carry_the_region(
     template: Template, taug_stack: TaugStack, taug_template: Template
 ) -> None:
-    """IAM and CloudFront names hold for the whole account: without the region,
-    a second stack in another region collides with the first."""
-    resources = template.to_json()["Resources"].values()
-    names = [
-        resource_of(taug_stack, taug_template, taug_stack.knowledge_base_role)["Properties"][
-            "RoleName"
-        ],
-        *(
-            r["Properties"]["ResponseHeadersPolicyConfig"]["Name"]
-            for r in resources
-            if r["Type"] == "AWS::CloudFront::ResponseHeadersPolicy"
-        ),
-        *(
-            r["Properties"]["OriginAccessControlConfig"]["Name"]
-            for r in resources
-            if r["Type"] == "AWS::CloudFront::OriginAccessControl"
-        ),
+    """IAM names hold for the whole account: without the region, a stack in another region
+    would collide with this one."""
+    name = resource_of(taug_stack, taug_template, taug_stack.knowledge_base_role)["Properties"][
+        "RoleName"
     ]
-    assert len(names) == 4
-    for name in names:
-        assert {"Ref": "AWS::Region"} in name["Fn::Join"][1], name
+    assert {"Ref": "AWS::Region"} in name["Fn::Join"][1], name
 
 
 def test_answer_role_has_no_managed_policy(stack: SvarStack, template: Template) -> None:
@@ -909,207 +877,47 @@ def test_answer_role_has_no_managed_policy(stack: SvarStack, template: Template)
     assert "ManagedPolicyArns" not in resource_of(stack, template, stack.answer_role)["Properties"]
 
 
-def test_the_function_url_needs_signed_requests(stack: SvarStack, template: Template) -> None:
-    """AuthType AWS_IAM: the URL is not a way in, and origin access control demands it.
-
-    No CORS configuration either — the page is served from the same address,
-    so there is no cross-origin request to allow.
-    """
+def test_the_function_url_is_open_and_allows_no_other_origin(
+    stack: SvarStack, template: Template
+) -> None:
+    """AuthType NONE: the URL is the address, and the key header is the gate. No CORS
+    configuration either: the page is served from the same address, so there is no
+    cross-origin request to allow."""
     template.resource_count_is("AWS::Lambda::Url", 1)
     url = resource_of(stack, template, stack.function_url)
-    assert url["Properties"]["AuthType"] == "AWS_IAM"
+    assert url["Properties"]["AuthType"] == "NONE"
     assert "Cors" not in url["Properties"]
 
 
-def test_exactly_one_output_is_a_function_url(stack: SvarStack, template: Template) -> None:
-    url_id = stack.get_logical_id(stack.function_url.node.default_child)
-    url_outputs = [
-        name
-        for name, output in template.find_outputs("*").items()
-        if url_id in json.dumps(output["Value"])
-    ]
-    assert url_outputs == ["FunctionUrl"]
-    assert template.find_outputs("FunctionUrl")["FunctionUrl"]["Value"] == get_att(
-        stack, stack.function_url.node.default_child, "FunctionUrl"
-    )
+def test_the_web_address_is_the_function_url(stack: SvarStack, template: Template) -> None:
+    value = template.find_outputs("WebUrl")["WebUrl"]["Value"]
+    assert value == get_att(stack, stack.function_url.node.default_child, "FunctionUrl")
 
 
-# --- The page, and the one address in front of everything ----------------
-
-
-def distribution_config(stack: SvarStack, template: Template) -> Mapping[str, Any]:
-    return resource_of(stack, template, stack.distribution)["Properties"]["DistributionConfig"]
-
-
-def test_only_cloudfront_may_invoke_the_function_and_only_this_distribution(
-    stack: SvarStack, template: Template
-) -> None:
-    """Every permission on the function, each bound to this distribution.
-
-    The origin access control construct adds the two the documentation asks
-    for, `lambda:InvokeFunction` only through the URL; the stack adds
-    `lambda:InvokeFunction` once more (`allow_cloudfront_to_invoke`). Without
-    the source condition any distribution in any account could invoke the
-    function.
-    """
-    distribution_arn_parts = [
-        "arn:",
-        {"Ref": "AWS::Partition"},
-        ":cloudfront::",
-        {"Ref": "AWS::AccountId"},
-        ":distribution/",
-        {"Ref": stack.get_logical_id(stack.distribution.node.default_child)},
-    ]
-    permissions = template.find_resources("AWS::Lambda::Permission")
-    granted = []
-    for permission in permissions.values():
-        properties = permission["Properties"]
-        assert properties["Principal"] == "cloudfront.amazonaws.com"
-        assert properties["SourceArn"]["Fn::Join"] == ["", distribution_arn_parts]
-        granted.append((properties["Action"], properties.get("InvokedViaFunctionUrl", False)))
-    assert sorted(granted) == [
-        ("lambda:InvokeFunction", False),
-        ("lambda:InvokeFunction", True),
-        ("lambda:InvokeFunctionUrl", False),
-    ]
-
-
-def test_the_site_bucket_is_private_and_no_website(stack: SvarStack, template: Template) -> None:
-    """An S3 website endpoint serves plain HTTP only, so the bucket is never one."""
-    properties = resource_of(stack, template, stack.site_bucket)["Properties"]
-    assert properties["PublicAccessBlockConfiguration"] == {
-        "BlockPublicAcls": True,
-        "BlockPublicPolicy": True,
-        "IgnorePublicAcls": True,
-        "RestrictPublicBuckets": True,
-    }
-    assert "WebsiteConfiguration" not in properties
-    assert "VersioningConfiguration" not in properties
-
-
-def test_the_site_bucket_opens_only_for_this_distribution(
-    stack: SvarStack, template: Template
-) -> None:
-    policy = resource_of(stack, template, stack.site_bucket.policy)["Properties"]["PolicyDocument"]
-    (read,) = [s for s in policy["Statement"] if s["Effect"] == "Allow"]
-    assert read["Action"] == "s3:GetObject"
-    assert read["Principal"] == {"Service": "cloudfront.amazonaws.com"}
-    source_arn = read["Condition"]["StringEquals"]["AWS:SourceArn"]["Fn::Join"][1]
-    assert {"Ref": stack.get_logical_id(stack.distribution.node.default_child)} in source_arn
-
-
-def test_both_origins_are_reached_through_an_origin_access_control(
-    stack: SvarStack, template: Template
-) -> None:
-    """Neither the bucket nor the function URL is reachable beside the distribution."""
-    origins = distribution_config(stack, template)["Origins"]
-    assert len(origins) == 2
-    for origin in origins:
-        assert "OriginAccessControlId" in origin
-
-    controls = template.find_resources("AWS::CloudFront::OriginAccessControl")
-    assert len(controls) == 2
-    kinds = set()
-    for control in controls.values():
-        config = control["Properties"]["OriginAccessControlConfig"]
-        assert config["SigningBehavior"] == "always"
-        assert config["SigningProtocol"] == "sigv4"
-        kinds.add(config["OriginAccessControlOriginType"])
-    assert kinds == {"s3", "lambda"}
-
-
-def test_the_page_is_served_over_https_only(stack: SvarStack, template: Template) -> None:
-    config = distribution_config(stack, template)
-    assert config["DefaultRootObject"] == SITE_ROOT_DOCUMENT
-    assert config["DefaultCacheBehavior"]["ViewerProtocolPolicy"] == "redirect-to-https"
-    assert config["DefaultCacheBehavior"]["AllowedMethods"] == ["GET", "HEAD"]
-    for behavior in config["CacheBehaviors"]:
-        assert behavior["ViewerProtocolPolicy"] == "https-only"
-
-
-def test_the_ask_path_posts_to_the_function_and_is_never_cached(
-    stack: SvarStack, template: Template
-) -> None:
-    """An answer differs per question and per key; a cached one would be the wrong answer."""
-    (behavior,) = distribution_config(stack, template)["CacheBehaviors"]
-    assert behavior["PathPattern"] == ASK_PATH
-    assert "POST" in behavior["AllowedMethods"]
-    # CachingDisabled and AllViewerExceptHostHeader, the two managed policies.
-    assert behavior["CachePolicyId"] == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
-    assert behavior["OriginRequestPolicyId"] == "b689b0a8-53d0-40ab-baf2-68738e2966ac"
-
-    function_origin = [
-        o for o in distribution_config(stack, template)["Origins"] if "CustomOriginConfig" in o
-    ]
-    (origin,) = function_origin
-    assert behavior["TargetOriginId"] == origin["Id"]
-    assert origin["CustomOriginConfig"]["OriginProtocolPolicy"] == "https-only"
-
-
-def test_cloudfront_waits_as_long_as_an_account_may_without_asking(
-    stack: SvarStack, template: Template
-) -> None:
-    """The response-timeout quota is 1-120 seconds; more needs an approved increase."""
-    (origin,) = [
-        o for o in distribution_config(stack, template)["Origins"] if "CustomOriginConfig" in o
-    ]
-    assert (
-        origin["CustomOriginConfig"]["OriginReadTimeout"] == ORIGIN_RESPONSE_TIMEOUT_SECONDS == 120
-    )
-
-
-def security_headers(template: Template) -> Mapping[str, Any]:
-    """The one response headers policy, as CloudFormation would receive it."""
-    policy = only_resource(template, "AWS::CloudFront::ResponseHeadersPolicy")
-    return policy["Properties"]["ResponseHeadersPolicyConfig"]["SecurityHeadersConfig"]
-
-
-def test_both_behaviours_send_the_security_headers(stack: SvarStack, template: Template) -> None:
-    """The page and the answer, one policy — the distribution is the only free place for it."""
-    config = distribution_config(stack, template)
-    headers = stack.node.find_child("SecurityHeaders")
-    policy_id = {"Ref": stack.get_logical_id(headers.node.default_child)}
-    assert config["DefaultCacheBehavior"]["ResponseHeadersPolicyId"] == policy_id
-    for behavior in config["CacheBehaviors"]:
-        assert behavior["ResponseHeadersPolicyId"] == policy_id
-
-
-def test_the_page_says_what_it_may_load_and_who_may_frame_it(template: Template) -> None:
+def test_the_page_says_what_it_may_load_and_who_may_frame_it() -> None:
     """A page that keeps a key in localStorage may not be framed and may not load strangers.
 
     ``default-src 'none'`` is the floor and every source below it is the
     page's own origin, so a script or a stylesheet added from anywhere else
     does not run. ``frame-ancestors 'none'`` keeps the page out of somebody
-    else's frame, where the key field would be theirs to read.
+    else's frame, where the key field would be theirs to read. The function sets these
+    headers on every response, page and answer alike (svar/app/page.py).
     """
-    policy = security_headers(template)["ContentSecurityPolicy"]
-    assert policy["Override"] is True
-    directives = dict(part.split(" ", 1) for part in policy["ContentSecurityPolicy"].split("; "))
+    policy = SECURITY_HEADERS["Content-Security-Policy"]
+    directives = dict(part.split(" ", 1) for part in policy.split("; "))
     assert directives["default-src"] == "'none'"
     assert directives["frame-ancestors"] == "'none'"
     assert directives["script-src"] == directives["style-src"] == "'self'"
     assert directives["connect-src"] == "'self'"
 
 
-def test_the_address_may_only_be_reached_over_https_and_not_be_sniffed(
-    template: Template,
-) -> None:
-    headers = security_headers(template)
-    assert headers["StrictTransportSecurity"]["AccessControlMaxAgeSec"] == (
-        HSTS_MAX_AGE_DAYS * 24 * 3600
+def test_the_address_may_only_be_reached_over_https_and_not_be_sniffed() -> None:
+    assert SECURITY_HEADERS["Strict-Transport-Security"] == (
+        f"max-age={HSTS_MAX_AGE_DAYS * 24 * 3600}; includeSubDomains"
     )
-    assert headers["StrictTransportSecurity"]["IncludeSubdomains"] is True
-    assert headers["ContentTypeOptions"] == {"Override": True}
-    assert headers["ReferrerPolicy"]["ReferrerPolicy"] == "no-referrer"
-    assert headers["FrameOptions"]["FrameOption"] == "DENY"
-
-
-def test_the_web_address_is_the_distribution(stack: SvarStack, template: Template) -> None:
-    value = template.find_outputs("WebUrl")["WebUrl"]["Value"]
-    assert value["Fn::Join"][1] == [
-        "https://",
-        get_att(stack, stack.distribution.node.default_child, "DomainName"),
-    ]
+    assert SECURITY_HEADERS["X-Content-Type-Options"] == "nosniff"
+    assert SECURITY_HEADERS["Referrer-Policy"] == "no-referrer"
+    assert SECURITY_HEADERS["X-Frame-Options"] == "DENY"
 
 
 # --- The page's own files ------------------------------------------------
@@ -1121,7 +929,7 @@ def web_files() -> list[Path]:
 
 def test_the_page_loads_nothing_from_anywhere_else() -> None:
     """No framework, no font, no script from a server that is not this one."""
-    markup = (WEB_FOLDER / SITE_ROOT_DOCUMENT).read_text(encoding="utf-8")
+    markup = (WEB_FOLDER / ROOT_DOCUMENT).read_text(encoding="utf-8")
     referenced = re.findall(r'(?:src|href)="([^"]*)"', markup)
     assert referenced, "the page should reference its script and its stylesheet"
     names = {path.name for path in web_files()}
@@ -1182,13 +990,12 @@ def page_number(name: str) -> int:
 
 
 def test_the_page_and_the_stack_mean_the_same_path_and_the_same_headers() -> None:
-    """A typo here is a green suite and a page that reaches the wrong origin.
+    """A typo here is a green suite and a page that reaches the wrong path.
 
-    The page posts to `ASK_PATH`; CloudFront sends exactly that one path to
-    the function and everything else to the bucket. Move the path in the
-    stack alone and the page's POST falls onto the default behaviour: S3
-    answers 403, CloudFront hands back HTML, and the page — which can only
-    read what it gets — tells the reader something about their key. The two
+    The page posts to `ASK_PATH`; the function answers exactly that one path and serves
+    its files on every other (svar/app/page.py). Move the path on one side alone and the
+    page's POST lands on a file path: the function answers 404 in plain text, and the page,
+    which can only read what it gets, tells the reader something about their key. The
     headers are the same kind of agreement one layer further in.
     """
     assert page_constant("ASK_PATH") == ASK_PATH
@@ -1213,8 +1020,8 @@ def test_the_page_asks_once_at_a_time() -> None:
 def test_the_page_stops_waiting_by_itself() -> None:
     """Without this a hung connection leaves the button on "Asking…" forever.
 
-    The page waits a little longer than CloudFront does, so in every ordinary
-    case CloudFront's 504 arrives first and says more. This is the floor
+    The page waits a little longer than the function may run, so in every ordinary
+    case the function's own answer or 502 arrives first and says more. This is the floor
     under it: an abort, a cleared timer, and a sentence.
     """
     script = (WEB_FOLDER / "app.js").read_text(encoding="utf-8")
@@ -1222,8 +1029,8 @@ def test_the_page_stops_waiting_by_itself() -> None:
     assert "signal: controller.signal" in script
     assert "clearTimeout(giveUp)" in script
     assert "AbortError" in script
-    # Longer than the distribution waits, so the 504 is the answer that wins.
-    assert page_number("REQUEST_TIMEOUT_MS") > ORIGIN_RESPONSE_TIMEOUT_SECONDS * 1000
+    # Longer than the function may run, so the function's answer is the one that wins.
+    assert page_number("REQUEST_TIMEOUT_MS") > ANSWER_TIMEOUT_SECONDS * 1000
 
 
 # --- Key budgets ---------------------------------------------------------
@@ -1271,7 +1078,7 @@ def test_the_defaults_the_stack_hands_over_are_a_budget_the_handler_accepts() ->
         {
             "KNOWLEDGE_BASE_ID": "KB1",
             "MODEL_ID": ANSWER_MODEL_ID,
-            "REGION": "us-east-1",
+            "REGION": TEST_REGION,
             "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
             "API_KEY_PARAMETER_PATH": API_KEY_PARAMETER_PATH,
             "BUDGET_TABLE_NAME": BUDGET_TABLE_NAME,
@@ -1282,14 +1089,16 @@ def test_the_defaults_the_stack_hands_over_are_a_budget_the_handler_accepts() ->
             "GUARDRAIL_VERSION": "1",
             "EXCERPT_GUARDRAIL_ID": "gr2",
             "EXCERPT_GUARDRAIL_VERSION": "1",
-            "TOPIC_GUARDRAIL_ID": "gr3",
-            "TOPIC_GUARDRAIL_VERSION": "1",
+            "TOPIC_MODEL_ID": TOPIC_MODEL.model_id,
+            "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS": TOPIC_MODEL.input_per_1k,
+            "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": TOPIC_MODEL.output_per_1k,
             "PRICE_INPUT_PER_1K_TOKENS": PRICE_INPUT_PER_1K_TOKENS,
             "PRICE_OUTPUT_PER_1K_TOKENS": PRICE_OUTPUT_PER_1K_TOKENS,
             "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
             "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
             "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
-            "PRICE_DATE": PRICE_DATE,
+            "PRICE_DATE": FRANKFURT_PRICE_DATE,
+            "PAGE_FOLDER": "/opt",
         }
     )
     assert (DEFAULT_QUESTION_LIMIT, DEFAULT_WINDOW_HOURS) == (10, 48)
@@ -1298,13 +1107,12 @@ def test_the_defaults_the_stack_hands_over_are_a_budget_the_handler_accepts() ->
 # --- Guardrail -----------------------------------------------------------
 
 
-def test_three_guardrails_each_with_one_version(stack: SvarStack, template: Template) -> None:
-    template.resource_count_is("AWS::Bedrock::Guardrail", 3)
-    template.resource_count_is("AWS::Bedrock::GuardrailVersion", 3)
+def test_two_guardrails_each_with_one_version(stack: SvarStack, template: Template) -> None:
+    template.resource_count_is("AWS::Bedrock::Guardrail", 2)
+    template.resource_count_is("AWS::Bedrock::GuardrailVersion", 2)
     for guardrail, version, name in (
         (stack.guardrail, stack.guardrail_version, GUARDRAIL_NAME),
         (stack.excerpt_guardrail, stack.excerpt_guardrail_version, EXCERPT_GUARDRAIL_NAME),
-        (stack.topic_guardrail, stack.topic_guardrail_version, TOPIC_GUARDRAIL_NAME),
     ):
         assert resource_of(stack, template, guardrail)["Properties"]["Name"] == name
         assert resource_of(stack, template, version)["Properties"][
@@ -1328,32 +1136,11 @@ def test_the_excerpt_guardrail_masks_the_same_details_and_does_nothing_else(
     assert 1 <= len(properties["BlockedOutputsMessaging"]) <= 500
 
 
-def test_the_four_topics_are_refused_in_the_question_and_in_the_answer_without_citations(
+def test_the_answer_guardrail_reads_no_topic_and_stays_in_the_region(
     stack: SvarStack, template: Template
 ) -> None:
-    """The topic guardrail reads all four in the question, after its frame, and in the answer
-    without its citations: in the answer as the model writes it, `Private lives` withheld short
-    harmless answers for their citations [1][4] or [1][2][4], among them q15 and de11
-    (04.10.2026)."""
-    properties = resource_of(stack, template, stack.topic_guardrail)["Properties"]
-    topics = properties["TopicPolicyConfig"]["TopicsConfig"]
-    assert [topic["Name"] for topic in topics] == [
-        "Legal action",
-        "Tax returns",
-        "Medical advice",
-        "Private lives",
-    ]
-    for topic in topics:
-        assert topic["Type"] == "DENY"
-        assert (topic["InputEnabled"], topic["InputAction"]) == (True, "BLOCK")
-        assert (topic["OutputEnabled"], topic["OutputAction"]) == (True, "BLOCK")
-    assert properties["TopicPolicyConfig"]["TopicsTierConfig"] == {"TierName": TOPICS_TIER}
-
-
-def test_the_answer_guardrail_reads_no_topic(stack: SvarStack, template: Template) -> None:
-    """Since the second deploy of 06.10.2026 the topic guardrail is the only one that reads the
-    topics; the answer guardrail keeps masking, grounding, the EU profile and the messages."""
-    assert ANSWER_GUARDRAIL_READS_QUESTION_TOPICS is False
+    """The topic model reads the topics (svar/app/topic_check.py); the answer guardrail keeps
+    masking, grounding and the messages, without a guardrail profile."""
     properties = resource_of(stack, template, stack.guardrail)["Properties"]
     assert set(properties) == {
         "Name",
@@ -1362,100 +1149,11 @@ def test_the_answer_guardrail_reads_no_topic(stack: SvarStack, template: Templat
         "BlockedOutputsMessaging",
         "SensitiveInformationPolicyConfig",
         "ContextualGroundingPolicyConfig",
-        "CrossRegionConfig",
     }
     assert properties["Description"] == (
         "Andur: masks personal details, withholds ungrounded answers."
     )
-
-
-def test_the_second_deploy_took_the_topics_off_the_answer_guardrail_and_nothing_else(
-    stack: SvarStack, template: Template, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Against the first deploy, with the flag on: then the answer guardrail read the four
-    topics in the question only. The second deploy takes that policy off and changes nothing
-    else of either guardrail but their descriptions, and both get a new version."""
-    from svar.infra import guardrails as stack_guardrails
-
-    def guardrails(of: SvarStack, resources: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-        return {
-            name: resources[of.get_logical_id(construct)]["Properties"]
-            for name, construct in (
-                ("answer", of.guardrail),
-                ("topic", of.topic_guardrail),
-                ("answer version", of.guardrail_version),
-                ("topic version", of.topic_guardrail_version),
-            )
-        }
-
-    second = guardrails(stack, template.to_json()["Resources"])
-    monkeypatch.setattr(stack_guardrails, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
-    _, other = andur_stacks(cdk.App(context=deploy_context()), "FirstDeployStack")
-    first = guardrails(other, Template.from_stack(other).to_json()["Resources"])
-
-    first_topics = first["answer"]["TopicPolicyConfig"]["TopicsConfig"]
-    for topic in first_topics:
-        assert (topic["InputEnabled"], topic["InputAction"]) == (True, "BLOCK")
-        assert (topic["OutputEnabled"], topic["OutputAction"]) == (False, "NONE")
-    assert [t["Name"] for t in first_topics] == [
-        t["Name"] for t in second["topic"]["TopicPolicyConfig"]["TopicsConfig"]
-    ]
-    assert set(first["answer"]) - set(second["answer"]) == {"TopicPolicyConfig"}
-    assert set(second["answer"]) <= set(first["answer"])
-    for key in second["answer"]:
-        if key != "Description":
-            assert second["answer"][key] == first["answer"][key], key
-    assert {key for key in first["topic"] if first["topic"][key] != second["topic"][key]} == {
-        "Description"
-    }
-    assert second["answer version"]["Description"] != first["answer version"]["Description"]
-    assert second["topic version"]["Description"] != first["topic version"]["Description"]
-
-
-def test_the_topic_guardrail_checks_topics_and_does_nothing_else(
-    stack: SvarStack, template: Template
-) -> None:
-    """No masking and no grounding: those stay on the model call, where they read the answer
-    with its citations as before. Its messages are the answer guardrail's."""
-    properties = resource_of(stack, template, stack.topic_guardrail)["Properties"]
-    answer = resource_of(stack, template, stack.guardrail)["Properties"]
-    assert set(properties) == {
-        "Name",
-        "Description",
-        "BlockedInputMessaging",
-        "BlockedOutputsMessaging",
-        "TopicPolicyConfig",
-        "CrossRegionConfig",
-    }
-    assert properties["CrossRegionConfig"] == answer["CrossRegionConfig"]
-    assert properties["BlockedInputMessaging"] == answer["BlockedInputMessaging"]
-    assert properties["BlockedOutputsMessaging"] == answer["BlockedOutputsMessaging"]
-    assert "SensitiveInformationPolicyConfig" in answer
-    assert "ContextualGroundingPolicyConfig" in answer
-
-
-def test_the_topic_probe_builds_the_topics_the_stack_deploys(
-    stack: SvarStack, template: Template
-) -> None:
-    """The probe measures what a deploy would ship in the topic guardrail: the same topics in
-    the same order, the same actions, tier and EU profile. Bedrock names the fields in
-    camelCase, CloudFormation in PascalCase, and CloudFormation calls the tier
-    `TopicsTierConfig`."""
-    properties = resource_of(stack, template, stack.topic_guardrail)["Properties"]
-    deployed = properties["TopicPolicyConfig"]
-    probe = topic_probe.probe_request()
-    assert [
-        {key[0].upper() + key[1:]: value for key, value in topic.items()}
-        for topic in probe["topicPolicyConfig"]["topicsConfig"]
-    ] == deployed["TopicsConfig"]
-    assert probe["topicPolicyConfig"]["tierConfig"] == {
-        "tierName": deployed["TopicsTierConfig"]["TierName"]
-    }
-    assert probe["crossRegionConfig"] == {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID}
-    assert properties["CrossRegionConfig"] == {"GuardrailProfileArn": profile_arn(TEST_REGION)}
-    assert probe["blockedInputMessaging"] == properties["BlockedInputMessaging"]
-    assert probe["blockedOutputsMessaging"] == properties["BlockedOutputsMessaging"]
-    assert probe["name"] == "andur-topic-probe" != properties["Name"]
+    assert "guardrail-profile" not in json.dumps(template.to_json())
 
 
 def pascal_case(value: Any) -> Any:
@@ -1471,39 +1169,17 @@ def test_the_grounding_probe_copies_the_answer_guardrail(
     stack: SvarStack, template: Template
 ) -> None:
     """What the probe checks German answers with is what the function checks them with: no
-    topic, as the answer guardrail has none, its masking, its grounding thresholds, its profile
-    and messages."""
+    topic, as the answer guardrail has none, its masking, its grounding thresholds and its
+    messages, in the region."""
     properties = resource_of(stack, template, stack.guardrail)["Properties"]
     probe = grounding_probe.probe_request(TEST_REGION)
     assert "topicPolicyConfig" not in probe and "TopicPolicyConfig" not in properties
     for name in ("sensitiveInformationPolicyConfig", "contextualGroundingPolicyConfig"):
         assert pascal_case(probe[name]) == properties[name[0].upper() + name[1:]], name
-    assert probe["crossRegionConfig"] == {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID}
-    assert properties["CrossRegionConfig"] == {"GuardrailProfileArn": profile_arn(TEST_REGION)}
+    assert "crossRegionConfig" not in probe
     assert probe["blockedInputMessaging"] == properties["BlockedInputMessaging"]
     assert probe["blockedOutputsMessaging"] == properties["BlockedOutputsMessaging"]
     assert probe["name"] == "andur-grounding-probe" != properties["Name"]
-    assert set(probe) - {"name", "description"} == {
-        key[0].lower() + key[1:] for key in properties if key not in {"Name", "Description"}
-    }
-
-
-def test_with_the_flag_on_the_grounding_probe_copies_the_question_topics_too(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The copy follows the flag: on, as in the first deploy of 06.10.2026, the probe reads the
-    answer guardrail's topics on the same sides, in the same tier. CloudFormation calls the
-    tier `TopicsTierConfig`."""
-    from svar.infra import guardrails as stack_guardrails
-
-    monkeypatch.setattr(stack_guardrails, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
-    monkeypatch.setattr(grounding_probe, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
-    _, other = andur_stacks(cdk.App(context=deploy_context()), "FirstDeployProbeStack")
-    properties = resource_of(other, Template.from_stack(other), other.guardrail)["Properties"]
-    probe = grounding_probe.probe_request(TEST_REGION)
-    topics = probe["topicPolicyConfig"]
-    assert pascal_case(topics["topicsConfig"]) == properties["TopicPolicyConfig"]["TopicsConfig"]
-    assert pascal_case(topics["tierConfig"]) == properties["TopicPolicyConfig"]["TopicsTierConfig"]
     assert set(probe) - {"name", "description"} == {
         key[0].lower() + key[1:] for key in properties if key not in {"Name", "Description"}
     }
@@ -1523,76 +1199,20 @@ def test_topic_definitions_follow_the_user_guides_best_practices() -> None:
     assert len({name for name, _, _ in DENIED_TOPICS}) == len(DENIED_TOPICS)
 
 
-def test_denied_topics_run_in_the_standard_tier_through_the_eu_profile(
-    stack: SvarStack, template: Template
-) -> None:
-    """The Classic tier reads English, French and Spanish only. Measured 01.10.2026 against
-    the deployed guardrail: 5 of 16 German refusals passed, among them a tax question. The
-    Standard tier reads German and needs a guardrail profile; the EU one stays in the EU. The
-    topic guardrail reads the topics; the answer guardrail keeps the same profile."""
-    properties = resource_of(stack, template, stack.topic_guardrail)["Properties"]
-    assert TOPICS_TIER == "STANDARD"
-    assert properties["TopicPolicyConfig"]["TopicsTierConfig"] == {"TierName": "STANDARD"}
-    for guardrail in (stack.topic_guardrail, stack.guardrail):
-        assert resource_of(stack, template, guardrail)["Properties"]["CrossRegionConfig"] == {
-            "GuardrailProfileArn": profile_arn(TEST_REGION)
-        }
-    excerpt = resource_of(stack, template, stack.excerpt_guardrail)["Properties"]
-    assert "CrossRegionConfig" not in excerpt
+def test_frankfurt_is_the_one_region_of_the_model_table() -> None:
+    assert set(answer_models.REGIONS) == {"eu-central-1"} == {answer_models.DEFAULT_REGION}
 
 
-def test_the_eu_guardrail_profile_routes_inside_the_eu_only() -> None:
-    """The destination regions of eu.guardrail.v1:0 called from an EU region, as the user
-    guide lists them: Frankfurt, Ireland, Paris, Stockholm, Milan, Spain."""
-    assert GUARDRAIL_PROFILE_ID == "eu.guardrail.v1:0"
-    assert GUARDRAIL_PROFILE_REGIONS == (
-        "eu-central-1",
-        "eu-west-1",
-        "eu-west-3",
-        "eu-north-1",
-        "eu-south-1",
-        "eu-south-2",
-    )
-
-
-def test_the_pinned_region_synthesises_with_its_own_profile() -> None:
-    app = cdk.App(context=deploy_context())
-    _, stack = andur_stacks(app, "IrelandStack", env=cdk.Environment(region="eu-west-1"))
-    properties = resource_of(stack, Template.from_stack(stack), stack.guardrail)["Properties"]
-    assert properties["CrossRegionConfig"] == {"GuardrailProfileArn": profile_arn("eu-west-1")}
-
-
-@pytest.mark.parametrize("region", ["us-east-1", "eu-west-2", "il-central-1"])
+@pytest.mark.parametrize("region", ["eu-west-2", "eu-north-1", "eu-central-2", "il-central-1"])
 def test_a_stack_outside_the_regions_of_the_model_table_does_not_synthesise(region: str) -> None:
-    """London has its own UK profile, and from Tel Aviv the EU profile also routes to
-    Tel Aviv: neither keeps the guardrail's checks in the EU, and neither has prices."""
+    """A region without a row has no prices and no topic model."""
     app = cdk.App(context=deploy_context())
     with pytest.raises(KeyError, match="has no models"):
         andur_stacks(app, "OutsideStack", env=cdk.Environment(region=region))
 
 
-def test_a_region_outside_the_profiles_regions_does_not_synthesise_its_guardrails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Should a region without a topic model ever join the table outside the profile's
-    regions, its guardrails would send their checks across a border."""
-    monkeypatch.setitem(answer_models.REGIONS, "eu-west-2", answer_models.REGIONS["eu-west-1"])
-    app = cdk.App(context=deploy_context())
-    with pytest.raises(ValueError, match="not a source region"):
-        andur_stacks(app, "OutsideStack", env=cdk.Environment(region="eu-west-2"))
-
-
-def test_topics_stay_inside_what_bedrock_accepts() -> None:
-    """The Classic tier's limits, which the Standard tier's (definitions up to 1,000
-    characters) contain: a definition of at most 200 characters, up to five examples of at
-    most 100. Too long is no synth error; it is a failed deploy after several minutes.
-    """
-    name_pattern = re.compile(r"^[0-9a-zA-Z-_ !?.]+$")
-    for name, definition, examples in DENIED_TOPICS:
-        assert name_pattern.match(name) and len(name) <= 100, name
-        assert 1 <= len(definition) <= 200, name
-        assert 1 <= len(examples) <= 5, name
-        assert all(1 <= len(example) <= 100 for example in examples), name
+def test_the_guardrail_messages_stay_inside_what_bedrock_accepts() -> None:
+    """Too long is no synth error; it is a failed deploy after several minutes."""
     assert 1 <= len(BLOCKED_INPUT_MESSAGE) <= 500
     assert 1 <= len(BLOCKED_OUTPUT_MESSAGE) <= 500
 
@@ -1633,7 +1253,7 @@ def test_grounding_and_relevance_are_checked_at_documented_thresholds(
     ]
     filters = {check["Type"]: check for check in config["FiltersConfig"]}
     assert set(filters) == {"GROUNDING", "RELEVANCE"}
-    assert filters["GROUNDING"]["Threshold"] == GROUNDING_THRESHOLD == 0.7
+    assert filters["GROUNDING"]["Threshold"] == FRANKFURT.grounding_threshold == 0.8
     assert filters["RELEVANCE"]["Threshold"] == RELEVANCE_THRESHOLD == 0.7
     for check in filters.values():
         assert 0 <= check["Threshold"] <= 0.99  # 1 blocks everything, says the user guide
@@ -1646,7 +1266,6 @@ def test_a_changed_setting_makes_a_new_guardrail_version(monkeypatch: pytest.Mon
     Without that, a new threshold would reach the guardrail's draft and never
     the version the function uses.
     """
-    from svar.infra import guardrails as stack_guardrails
 
     def version_description() -> str:
         _, other = andur_stacks(cdk.App(context=deploy_context()), "VersionStack")
@@ -1656,7 +1275,9 @@ def test_a_changed_setting_makes_a_new_guardrail_version(monkeypatch: pytest.Mon
 
     before = version_description()
     assert before == version_description()
-    monkeypatch.setattr(stack_guardrails, "GROUNDING_THRESHOLD", 0.8)
+    monkeypatch.setitem(
+        answer_models.REGIONS, TEST_REGION, FRANKFURT._replace(grounding_threshold=0.9)
+    )
     after = version_description()
     assert after != before
     assert len(after) <= 200
@@ -1717,7 +1338,7 @@ def test_the_prices_are_ones_the_handler_accepts_and_dated() -> None:
         PRICE_GROUNDING_PER_1K_UNITS,
     ):
         config.price("PRICE", value)
-    assert config.price_day(PRICE_DATE) == PRICE_DATE
+    assert config.price_day(FRANKFURT_PRICE_DATE) == FRANKFURT_PRICE_DATE
 
 
 def test_the_guardrail_version_is_an_output(stack: SvarStack, template: Template) -> None:
@@ -1726,38 +1347,30 @@ def test_the_guardrail_version_is_an_output(stack: SvarStack, template: Template
     assert output["Value"] == {"Ref": stack.get_logical_id(stack.guardrail_version)}
     (excerpt_output,) = template.find_outputs("ExcerptGuardrailRef").values()
     assert excerpt_output["Value"] == {"Ref": stack.get_logical_id(stack.excerpt_guardrail_version)}
-    (topic_output,) = template.find_outputs("TopicGuardrailRef").values()
-    assert topic_output["Value"] == {"Ref": stack.get_logical_id(stack.topic_guardrail_version)}
-    # The function sends it the question as INPUT and the answer as OUTPUT
-    # (svar/app/topic_check.py).
-    assert topic_output["Description"].startswith(
-        "The guardrail that checks the question, and the answer without its citations,"
-    )
+    (topic_output,) = template.find_outputs("TopicModelId").values()
+    assert topic_output["Value"] == FRANKFURT.topic_model_id
 
 
-def test_a_changed_topic_makes_a_new_version_of_the_topic_guardrail_only(
+def test_a_changed_topic_changes_no_guardrail_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The topic guardrail reads `DENIED_TOPICS` on both sides: a changed definition has to
-    reach the version the function uses. The answer guardrail reads no topic, so its version
-    stays."""
-    from svar.infra import guardrails as stack_guardrails
+    """The topic model reads `DENIED_TOPICS` (svar/app/topic_model.py); no guardrail does, so a
+    changed definition leaves both versions as they are."""
+    from svar.app import denied_topics
 
     def descriptions() -> tuple[str, str]:
         _, other = andur_stacks(cdk.App(context=deploy_context()), "TopicStack")
         resources = Template.from_stack(other).to_json()["Resources"]
         return tuple(
             resources[other.get_logical_id(version)]["Properties"]["Description"]
-            for version in (other.guardrail_version, other.topic_guardrail_version)
+            for version in (other.guardrail_version, other.excerpt_guardrail_version)
         )
 
-    answer_before, topic_before = descriptions()
-    name, definition, examples = stack_guardrails.DENIED_TOPICS[0]
-    changed = ((name, definition + " Changed.", examples), *stack_guardrails.DENIED_TOPICS[1:])
-    monkeypatch.setattr(stack_guardrails, "DENIED_TOPICS", changed)
-    answer_after, topic_after = descriptions()
-    assert answer_after == answer_before
-    assert topic_after != topic_before
+    before = descriptions()
+    name, definition, examples = denied_topics.DENIED_TOPICS[0]
+    changed = ((name, definition + " Changed.", examples), *denied_topics.DENIED_TOPICS[1:])
+    monkeypatch.setattr(denied_topics, "DENIED_TOPICS", changed)
+    assert descriptions() == before
 
 
 def test_no_role_may_do_more_than_count_on_the_budget_table(template: Template) -> None:
@@ -1786,14 +1399,13 @@ DEPLOYED_KEY_FUNCTION_IDS = {
 
 def test_the_stack_creates_no_workspace_key(template: Template) -> None:
     """Keys come from `python -m taug.scripts.workspace add`; no workspace is named in the code.
-    The custom resources left are the deploy drain, which waits and touches nothing, and
-    the copier that puts web/ into the site bucket."""
+    The one custom resource left is the deploy drain, which waits and touches nothing."""
     custom = sorted(
         resource["Type"]
         for resource in template.to_json()["Resources"].values()
         if resource["Type"].startswith("Custom::")
     )
-    assert custom == ["Custom::AndurDeployDrain", "Custom::CDKBucketDeployment"]
+    assert custom == ["Custom::AndurDeployDrain"]
 
 
 def test_the_key_function_keeps_its_logical_ids(taug_template: Template) -> None:
@@ -1846,7 +1458,7 @@ def test_every_log_group_has_a_retention_and_goes_with_the_stack(
 ) -> None:
     log_groups = template.find_resources("AWS::Logs::LogGroup")
     taug_log_groups = taug_template.find_resources("AWS::Logs::LogGroup")
-    assert (len(log_groups), len(taug_log_groups)) == (4, 2)
+    assert (len(log_groups), len(taug_log_groups)) == (3, 2)
     for log_group in [*log_groups.values(), *taug_log_groups.values()]:
         assert log_group["Properties"]["RetentionInDays"] == 30
         assert log_group["DeletionPolicy"] == "Delete"

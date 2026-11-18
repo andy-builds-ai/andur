@@ -12,12 +12,11 @@ import pytest
 import retrieval
 import sentences
 
-from svar.app.denied_topics import DENIED_TOPICS
 from svar.infra.answer_prompts import prompt_of
-from svar.infra.guardrails import GUARDRAIL_PROFILE_ID
 from svar.scripts import control_eval, control_marks, evaluate
 from svar.tests.test_handler import ENVIRONMENT
-from taug.infra.answer_models import ANSWER_MODELS, FRANKFURT_MODELS
+from taug.infra import answer_models
+from taug.infra.answer_models import FRANKFURT_MODELS
 
 #: The answer function's modules, as the scripts take them (`evaluate.import_app`).
 app = evaluate.import_app()
@@ -198,14 +197,8 @@ def test_the_numbers_in_a_gpt_oss_citation_are_not_counted() -> None:
     assert control_marks.uncited_sentences("A ist 5【1】. B ist 6.") == 1
 
 
-@pytest.mark.parametrize(
-    ("saved", "model"),
-    [({}, "Nova Pro"), ({"region": "eu-west-1"}, "Nova 2 Lite")],
-)
-def test_a_saved_run_is_marked_again_without_aws(
-    tmp_path: Path, saved: dict[str, str], model: str
-) -> None:
-    """A run names its region, whose models it ran; one saved before that ran in Frankfurt."""
+def saved_run(tmp_path: Path, model: str, **saved: str) -> tuple[Path, Path]:
+    """A question set of one question, and a saved run of ``model`` on it."""
     question = {
         "id": "c26",
         "workspace": "pellwick",
@@ -237,12 +230,52 @@ def test_a_saved_run_is_marked_again_without_aws(
     run.write_text(
         json.dumps({"runs": {model: [row]}, "passages": passages, **saved}), encoding="utf-8"
     )
+    return run, questions
+
+
+@pytest.mark.parametrize(
+    ("saved", "model"),
+    [({}, "Nova Pro"), ({"region": "eu-central-1"}, "Qwen3 32B")],
+)
+def test_a_saved_run_is_marked_again_without_aws(
+    tmp_path: Path, saved: dict[str, str], model: str
+) -> None:
+    """A run names its region, whose models it ran; one saved before that ran in Frankfurt."""
+    run, questions = saved_run(tmp_path, model, **saved)
     assert control_eval.main(["--regrade", str(run), "--questions", str(questions)]) == 0
     regraded = json.loads(run.read_text(encoding="utf-8"))
     marked = regraded["runs"][model][0]
     assert marked["added"] and marked["invented_numbers"] == ["20"]
     assert marked["forbidden"] == ["20 %"] and not marked["correct"]
     assert regraded["summaries"][0]["added"] == "1/1" and "regraded" in regraded
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [["--model", "Nova Pro"], ["--only", "c26"], ["--workspace", "pellwick"]],
+)
+def test_a_regrade_takes_no_selection(
+    tmp_path: Path, selection: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--regrade marks every model and question of the file again; a selection beside it
+    would be ignored, so it is refused before the file is read."""
+    run, questions = saved_run(tmp_path, "Nova Pro")
+    before = run.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit) as stop:
+        control_eval.main(["--regrade", str(run), "--questions", str(questions), *selection])
+    assert stop.value.code == 2
+    assert f"{selection[0]} would be ignored" in capsys.readouterr().err
+    assert run.read_text(encoding="utf-8") == before
+
+
+def test_a_regrade_of_a_run_from_a_region_without_a_table_rewrites_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run, questions = saved_run(tmp_path, "Nova Pro", region="eu-west-2")
+    before = run.read_text(encoding="utf-8")
+    assert control_eval.main(["--regrade", str(run), "--questions", str(questions)]) == 2
+    assert "eu-west-2, which has no models" in capsys.readouterr().err
+    assert run.read_text(encoding="utf-8") == before
 
 
 def test_a_forbidden_spelling_counts_only_on_its_own() -> None:
@@ -418,70 +451,27 @@ def test_the_passages_are_retrieved_once_per_question() -> None:
     assert calls == [("west-client", "kb", "Q?", "pellwick", 10)]
 
 
-def test_the_classic_probes_stay_in_the_region_and_copy_the_stack() -> None:
-    requests = control_eval.probe_requests("classic")
-    assert set(requests) == set(control_eval.PROBE_NAMES)
+def test_the_probes_copy_the_stacks_two_guardrails_in_the_region() -> None:
+    """The region's topic model checks the topics, so there is no topic probe."""
+    requests = control_eval.probe_requests()
+    assert set(requests) == set(control_eval.PROBE_NAMES) == {"answer", "excerpt"}
     assert all("crossRegionConfig" not in r for r in requests.values())
-    answer, topic = requests["answer"], requests["topic"]
-    # Like the deployed answer guardrail: the topic guardrail reads the question and the answer.
-    assert "topicPolicyConfig" not in answer
-    assert topic["topicPolicyConfig"]["tierConfig"] == {"tierName": "CLASSIC"}
-    assert [t["name"] for t in topic["topicPolicyConfig"]["topicsConfig"]] == [
-        name for name, _, _ in DENIED_TOPICS
-    ]
-    assert all(t["inputEnabled"] for t in topic["topicPolicyConfig"]["topicsConfig"])
-    assert all(t["outputEnabled"] for t in topic["topicPolicyConfig"]["topicsConfig"])
-    assert "topicPolicyConfig" not in requests["excerpt"]
+    assert all("topicPolicyConfig" not in r for r in requests.values())
+    answer = requests["answer"]
     assert {f["type"] for f in answer["contextualGroundingPolicyConfig"]["filtersConfig"]} == {
         "GROUNDING",
         "RELEVANCE",
     }
 
 
-def test_the_standard_probes_use_the_eu_profile() -> None:
-    requests = control_eval.probe_requests("standard")
-    for kind in ("answer", "topic"):
-        assert requests[kind]["crossRegionConfig"] == {
-            "guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID
-        }
-    assert requests["topic"]["topicPolicyConfig"]["tierConfig"] == {"tierName": "STANDARD"}
-    assert "crossRegionConfig" not in requests["excerpt"]
-
-
-def test_the_model_tier_has_no_topic_probe_and_no_profile() -> None:
-    """With a topic model the stack has no topic guardrail; the region's topic model checks."""
-    requests = control_eval.probe_requests("model")
-    assert set(requests) == {"answer", "excerpt"}
-    assert all("crossRegionConfig" not in r for r in requests.values())
-    assert "topicPolicyConfig" not in requests["answer"]
-
-
-def test_frankfurt_measures_its_answer_guardrail_without_the_profile() -> None:
-    requests = control_eval.probe_requests("standard", answer_profile=False)
-    assert "crossRegionConfig" not in requests["answer"]
-    assert requests["topic"]["crossRegionConfig"] == {
-        "guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID
-    }
-
-
-@pytest.mark.usefixtures("frankfurt_topic_model")
-def test_the_tier_follows_the_region_unless_it_is_named() -> None:
-    assert control_eval.parse_args(["--region", "eu-central-1"]).topics_tier == "model"
-    assert control_eval.parse_args(["--region", "eu-west-1"]).topics_tier == "classic"
-    named = ["--region", "eu-central-1", "--topics-tier", "classic"]
-    assert control_eval.parse_args(named).topics_tier == "classic"
-    with pytest.raises(SystemExit):
-        control_eval.parse_args(["--region", "eu-west-1", "--topics-tier", "model"])
-
-
 def test_retrieval_and_models_both_run_in_frankfurt_by_default() -> None:
-    """Svar runs in Frankfurt; a run without regions must not fetch its passages in Ireland."""
+    """Svar runs in Frankfurt; a run without regions takes the default region for both."""
     args = control_eval.parse_args([])
     assert (args.region, args.retrieve_region) == ("eu-central-1", "eu-central-1")
 
 
 @pytest.mark.usefixtures("frankfurt_topic_model")
-def test_without_a_topic_probe_the_regions_topic_model_checks_at_its_price() -> None:
+def test_the_regions_topic_model_checks_at_its_price() -> None:
     base = config.load_settings(ENVIRONMENT)
     model = FRANKFURT_MODELS[2]
     settings = control_eval.settings_for(
@@ -489,29 +479,23 @@ def test_without_a_topic_probe_the_regions_topic_model_checks_at_its_price() -> 
     )
     assert settings.topic_model_id == "openai.gpt-oss-20b-1:0"
     assert settings.answer_prompt == prompt_of(model) == "each-part"
-    assert (settings.topic_guardrail_id, settings.topic_guardrail_version) == (None, None)
     assert settings.prices.topic_model_input_tokens == Decimal("0.00009")
     assert settings.prices.topic_model_output_tokens == Decimal("0.0004")
-    probed = control_eval.settings_for(
-        base, model, "eu-central-1", {"answer": "gr-a", "topic": "gr-t", "excerpt": "gr-e"}
-    )
-    assert (probed.topic_model_id, probed.topic_guardrail_id) == (None, "gr-t")
 
 
 def test_control_eval_asks_nova_pro_with_the_prompt_of_its_table_row() -> None:
     base = config.load_settings(ENVIRONMENT)
-    nova_pro = next(m for m in ANSWER_MODELS if m.name == "Nova Pro")
+    nova_pro = next(m for m in FRANKFURT_MODELS if m.name == "Nova Pro")
     settings = control_eval.settings_for(
-        base, nova_pro, "eu-west-1", {"answer": "gr-a", "topic": "gr-t", "excerpt": "gr-e"}
+        base, nova_pro, "eu-central-1", {"answer": "gr-a", "excerpt": "gr-e"}
     )
     assert settings.answer_prompt == prompt_of(nova_pro) == "sentence-first"
 
 
-def test_the_frankfurt_models_stay_in_the_eu_and_leave_the_stack_table_alone() -> None:
+def test_the_frankfurt_models_stay_in_the_eu() -> None:
     assert all(evaluate.stays_in_the_eu(m.model_id) for m in FRANKFURT_MODELS)
     assert len({m.name for m in FRANKFURT_MODELS}) == len(FRANKFURT_MODELS)
-    assert "nvidia.nemotron-super-3-120b" in {m.model_id for m in ANSWER_MODELS}
-    assert control_eval.MODELS is FRANKFURT_MODELS
+    assert answer_models.REGIONS[control_eval.DEFAULT_REGION].models is FRANKFURT_MODELS
 
 
 @pytest.mark.parametrize(
@@ -561,7 +545,9 @@ def test_a_saved_passage_keeps_its_file_name_but_not_the_bucket() -> None:
     """Finding 7: the bucket's name holds the account id."""
     result = {
         "content": {"text": "Survey £60."},
-        "location": {"s3Location": {"uri": "s3://bucket-000000000000-eu-west-1/w/pellwick/a.md"}},
+        "location": {
+            "s3Location": {"uri": "s3://bucket-000000000000-eu-central-1/w/pellwick/a.md"}
+        },
         "metadata": {"workspace": "pellwick", "layer": "human"},
         "score": 0.5,
     }
@@ -600,7 +586,7 @@ def test_no_model_call_leaves_no_text_of_the_question_before(monkeypatch: Any) -
 @pytest.mark.parametrize(
     "argv, message",
     [
-        (["--region", "us-east-1"], "not EU regions"),
+        (["--region", "us-west-2"], "not EU regions"),
         (["--retrieve-region", "us-west-2"], "not EU regions"),
         (["--only", "c99"], "no questions"),
         (["--workspace", "nobody"], "no questions of nobody"),
@@ -621,7 +607,7 @@ def test_a_saved_passage_keeps_only_the_metadata_the_handler_reads() -> None:
         "metadata": {
             "workspace": "pellwick",
             "layer": "human",
-            "x-amz-bedrock-kb-source-uri": "s3://bucket-000000000000-eu-west-1/a.md",
+            "x-amz-bedrock-kb-source-uri": "s3://bucket-000000000000-eu-central-1/a.md",
         },
     }
     assert control_marks.without_bucket(result)["metadata"] == {
@@ -679,12 +665,12 @@ def test_a_regrade_after_the_question_changed_rewrites_nothing(tmp_path: Path) -
 
 def test_the_prices_and_date_are_the_regions_own() -> None:
     base = config.load_settings(ENVIRONMENT)
-    nova = next(m for m in ANSWER_MODELS if m.name == "Nova Pro")
+    nova = next(m for m in FRANKFURT_MODELS if m.name == "Nova Pro")
     settings = control_eval.settings_for(
-        base, nova, "eu-west-1", {"answer": "a", "topic": "t", "excerpt": "e"}
+        base, nova, "eu-central-1", {"answer": "a", "excerpt": "e"}
     )
-    assert settings.prices.input_tokens == Decimal("0.00092")
-    assert settings.price_date == "2026-09-28"
+    assert settings.prices.input_tokens == Decimal("0.00105")
+    assert settings.price_date == "2026-10-06"
 
 
 def run_with(

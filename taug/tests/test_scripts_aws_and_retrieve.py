@@ -150,7 +150,7 @@ def test_credential_failure_while_creating_a_client_is_readable(
 
     monkeypatch.setattr(boto3, "client", expired_login)
     with pytest.raises(AwsProblem, match="aws login"):
-        aws.client("s3", "us-east-1")
+        aws.client("s3", "eu-central-1")
 
 
 def test_missing_boto3_is_a_readable_problem(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,7 +165,7 @@ def test_missing_boto3_is_a_readable_problem(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(builtins, "__import__", without_boto3)
     with pytest.raises(AwsProblem, match="pip install"):
-        aws.client("s3", "us-east-1")
+        aws.client("s3", "eu-central-1")
 
 
 # --- Retrieve ------------------------------------------------------------

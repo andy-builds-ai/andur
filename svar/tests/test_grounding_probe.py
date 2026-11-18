@@ -9,7 +9,7 @@ import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 
 from svar.scripts import evaluate, grounding_probe
-from svar.tests.test_topic_probe import FakeBedrock
+from svar.tests.test_probe_guardrails import FakeBedrock
 
 QUESTION_SETS = {
     "en": evaluate.QUESTIONS_FILE,
@@ -309,8 +309,8 @@ class FakeRuntime:
 
 ENVIRONMENT = {
     "KNOWLEDGE_BASE_ID": "KB1",
-    "MODEL_ID": "eu.amazon.nova-pro-v1:0",
-    "REGION": "eu-west-1",
+    "MODEL_ID": "qwen.qwen3-235b-a22b-2507-v1:0",
+    "REGION": "eu-central-1",
     "NUMBER_OF_RESULTS": "10",
     "API_KEY_PARAMETER_PATH": "/andur/api-keys",
     "BUDGET_TABLE_NAME": "andur-key-budgets",
@@ -321,14 +321,16 @@ ENVIRONMENT = {
     "GUARDRAIL_VERSION": "4",
     "EXCERPT_GUARDRAIL_ID": "excerpt1",
     "EXCERPT_GUARDRAIL_VERSION": "2",
-    "TOPIC_GUARDRAIL_ID": "topic1",
-    "TOPIC_GUARDRAIL_VERSION": "3",
-    "PRICE_INPUT_PER_1K_TOKENS": "0.00092",
-    "PRICE_OUTPUT_PER_1K_TOKENS": "0.00368",
+    "TOPIC_MODEL_ID": "openai.gpt-oss-120b-1:0",
+    "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS": "0.0002",
+    "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": "0.00079",
+    "PRICE_INPUT_PER_1K_TOKENS": "0.00029",
+    "PRICE_OUTPUT_PER_1K_TOKENS": "0.00116",
     "PRICE_TOPIC_PER_1K_UNITS": "0.15",
     "PRICE_PII_PER_1K_UNITS": "0.10",
     "PRICE_GROUNDING_PER_1K_UNITS": "0.10",
-    "PRICE_DATE": "2026-09-28",
+    "PRICE_DATE": "2026-10-06",
+    "PAGE_FOLDER": "/opt",
 }
 
 
@@ -345,11 +347,13 @@ def run_main(
     monkeypatch.setattr(grounding_probe, "client", lambda service, region: clients[service])
     monkeypatch.setattr(grounding_probe, "deployed_environment", lambda region: ENVIRONMENT)
     monkeypatch.setattr(
-        grounding_probe.topic_probe, "wait_until_ready", lambda b, g, sleep=None, name="": None
+        grounding_probe.probe_guardrails,
+        "wait_until_ready",
+        lambda b, g, sleep=None, name="": None,
     )
-    # Ireland's, as `ENVIRONMENT` is: the probe guardrail through the EU profile, at 0.7. A
+    # Frankfurt's, as `ENVIRONMENT` is: the probe guardrail in the region, at 0.8. A
     # `--region` in ``args`` comes later and wins.
-    return grounding_probe.main(["--answers", str(path), "--region", "eu-west-1", *args])
+    return grounding_probe.main(["--answers", str(path), "--region", "eu-central-1", *args])
 
 
 def test_a_run_checks_every_answer_and_only_a_withheld_german_one_in_english(
@@ -361,7 +365,7 @@ def test_a_run_checks_every_answer_and_only_a_withheld_german_one_in_english(
     assert bedrock.names() == ["list_guardrails", "create_guardrail", "get_guardrail"] + [
         "delete_guardrail"
     ]
-    assert bedrock.calls[1][1] == grounding_probe.probe_request("eu-west-1")
+    assert bedrock.calls[1][1] == grounding_probe.probe_request("eu-central-1")
     assert bedrock.guardrails == {}
     # Every check on the probe's draft, with the workspace's passages only.
     assert {
@@ -414,7 +418,7 @@ def test_the_cost_of_a_run_counts_both_checks_and_the_translation(
     rows = {row["id"]: row for row in json.loads(out.read_text(encoding="utf-8"))["rows"]}
     # Two checks of 2 grounding and 1 PII units each, and a translation of 110 tokens in, 40
     # out and 1 topic unit.
-    expected = (110 * 0.00092 + 40 * 0.00368 + 1 * 0.15 + 4 * 0.10 + 2 * 0.10) / 1000
+    expected = (110 * 0.00029 + 40 * 0.00116 + 1 * 0.15 + 4 * 0.10 + 2 * 0.10) / 1000
     assert rows["r1"]["cost_usd"] == round(expected, 6)
     assert rows["k1"]["cost_usd"] == round((2 * 0.10 + 1 * 0.10) / 1000, 6)
 
@@ -523,11 +527,11 @@ def test_workers_must_be_at_least_one(monkeypatch: pytest.MonkeyPatch, tmp_path:
         run_main(monkeypatch, tmp_path, FakeBedrock(), FakeRuntime(), "--workers", "0")
 
 
-def test_a_region_outside_the_eu_profile_is_refused_before_any_call(
+def test_a_region_without_a_table_is_refused_before_any_call(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     bedrock = FakeBedrock()
-    assert run_main(monkeypatch, tmp_path, bedrock, FakeRuntime(), "--region", "us-east-1") == 2
+    assert run_main(monkeypatch, tmp_path, bedrock, FakeRuntime(), "--region", "eu-west-2") == 2
     assert bedrock.calls == []
 
 

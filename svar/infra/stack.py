@@ -2,17 +2,11 @@
 
 Taug's stack (taug/infra/stack.py) holds what it stands on."""
 
-from enum import Enum
-
 from aws_cdk import (
     CfnOutput,
     Stack,
     Token,
     aws_bedrock as bedrock,
-    aws_cloudfront as cloudfront,
-    aws_lambda as lambda_,
-    aws_s3 as s3,
-    aws_s3_deployment as s3_deployment,
 )
 from constructs import Construct
 
@@ -27,41 +21,13 @@ from svar.infra.answer_function import (
     create_function_url,
     create_page_layer,
 )
-from svar.infra.guardrails import (
-    create_answer_guardrail,
-    create_excerpt_guardrail,
-    create_topic_guardrail,
-)
-from svar.infra.web import (
-    allow_cloudfront_to_invoke,
-    create_distribution,
-    create_site_bucket,
-    upload_the_page,
-)
-from taug.infra.answer_models import (
-    DEFAULT_REGION,
-    answer_guardrail_uses_profile,
-    answer_model,
-    region_models,
-)
+from svar.infra.guardrails import create_answer_guardrail, create_excerpt_guardrail
+from taug.infra.answer_models import DEFAULT_REGION, answer_model, region_models
 from taug.infra.shared import create_log_group
 
 #: The stack's description, the same before and after Taug's documents, vectors and knowledge
 #: base move out: a move may change nothing else in the template.
 SVAR_DESCRIPTION = "Svar: guardrails, answer function and page, on Taug's knowledge base."
-
-
-class FromRegion(Enum):
-    """A setting of `SvarStack` that is not given: the stack takes it from its region's row of
-    `REGIONS` (taug/infra/answer_models.py).
-
-    A marker of its own, since None is a value of ``topic_model_id``."""
-
-    TABLE = "the region's table"
-
-
-#: The default of every setting `SvarStack` takes from its region's table.
-FROM_TABLE = FromRegion.TABLE
 
 
 class SvarStack(Stack):
@@ -74,48 +40,26 @@ class SvarStack(Stack):
         construct_id: str,
         *,
         knowledge_base: bedrock.CfnKnowledgeBase,
-        answer_model_id: str | FromRegion = FROM_TABLE,
-        topic_model_id: str | None | FromRegion = FROM_TABLE,
-        answer_guardrail_profile: bool | FromRegion = FROM_TABLE,
+        answer_model_id: str | None = None,
         answer_max_concurrency: int | None = ANSWER_MAX_CONCURRENCY,
-        behind_cloudfront: bool | FromRegion = FROM_TABLE,
         **kwargs,
     ) -> None:
         """``knowledge_base``: Taug's (taug/infra/stack.py), which the function searches;
         CDK passes its id and ARN between the stacks as an export and an import.
-        ``answer_model_id``, ``topic_model_id``, ``answer_guardrail_profile`` and
-        ``behind_cloudfront`` not given: the stack's region's row of `REGIONS`, so a stack
-        without them is the one infra/app.py builds for that region; a region without a row
-        is refused. ``topic_model_id`` None: the topic guardrail checks the denied topics,
-        through the EU guardrail profile. A model id: that model checks them in the stack's
-        region, and there is no topic guardrail. ``answer_guardrail_profile``: whether the
-        answer guardrail runs through the profile too; the excerpt guardrail never does.
-        ``behind_cloudfront`` False: no CloudFront, no site bucket; the function's URL is open
-        and serves the page too."""
+        ``answer_model_id`` None: the answer model of the stack's region's row of `REGIONS`;
+        another model must have a price in that row. The topic model and the grounding
+        threshold always come from the row; a region without one is refused. The function's
+        URL is the one address of page and questions, open, and serves the page too."""
         super().__init__(scope, construct_id, **kwargs)
         # Without a set region the table, and with it the prices, are the default region's;
         # infra/app.py always sets one.
         self.price_region = DEFAULT_REGION if Token.is_unresolved(self.region) else self.region
         self.models = region_models(self.price_region)
-        if isinstance(answer_model_id, FromRegion):
-            answer_model_id = self.models.answer_model_id
-        if isinstance(topic_model_id, FromRegion):
-            topic_model_id = self.models.topic_model_id
-        if isinstance(answer_guardrail_profile, FromRegion):
-            answer_guardrail_profile = self.models.answer_guardrail_profile
-        if isinstance(behind_cloudfront, FromRegion):
-            behind_cloudfront = self.models.behind_cloudfront
-        self.answer_model_id = answer_model_id
-        self.answer_model = answer_model(answer_model_id, self.price_region)
-        self.topic_model_id = topic_model_id
-        self.topic_model = (
-            None if topic_model_id is None else answer_model(topic_model_id, self.price_region)
-        )
-        self.answer_guardrail_profile = answer_guardrail_uses_profile(
-            answer_guardrail_profile, topic_model_id
-        )
+        self.answer_model_id = answer_model_id or self.models.answer_model_id
+        self.answer_model = answer_model(self.answer_model_id, self.price_region)
+        self.topic_model_id = self.models.topic_model_id
+        self.topic_model = answer_model(self.topic_model_id, self.price_region)
         self.answer_max_concurrency = answer_max_concurrency
-        self.behind_cloudfront = behind_cloudfront
 
         self.knowledge_base = knowledge_base
 
@@ -125,18 +69,6 @@ class SvarStack(Stack):
         )
         self.guardrail, self.guardrail_version = create_answer_guardrail(self)
         self.excerpt_guardrail, self.excerpt_guardrail_version = create_excerpt_guardrail(self)
-        self.topic_guardrail, self.topic_guardrail_version = (
-            create_topic_guardrail(self) if topic_model_id is None else (None, None)
-        )
-        guardrail_versions = [
-            version
-            for version in (
-                self.guardrail_version,
-                self.excerpt_guardrail_version,
-                self.topic_guardrail_version,
-            )
-            if version is not None
-        ]
         self.answer_role = create_answer_role(
             self,
             self.knowledge_base,
@@ -144,9 +76,8 @@ class SvarStack(Stack):
             self.answer_log_group,
             self.guardrail,
             self.excerpt_guardrail,
-            self.topic_guardrail,
         )
-        self.page_layer = None if behind_cloudfront else create_page_layer(self)
+        self.page_layer = create_page_layer(self)
         self.answer_function = create_answer_function(
             self,
             self.knowledge_base,
@@ -155,59 +86,27 @@ class SvarStack(Stack):
             self.answer_log_group,
             self.guardrail_version,
             self.excerpt_guardrail_version,
-            self.topic_guardrail_version,
             self.page_layer,
         )
         self.function_url = create_function_url(self, self.answer_function)
-        self.deploy_drain = create_deploy_drain(self, self.answer_function, guardrail_versions)
-
-        self.site_bucket: s3.Bucket | None = None
-        self.distribution: cloudfront.Distribution | None = None
-        self.invoke_permission: lambda_.CfnPermission | None = None
-        self.site_files: s3_deployment.BucketDeployment | None = None
-        if behind_cloudfront:
-            self.site_bucket = create_site_bucket(self)
-            self.distribution = create_distribution(self, self.site_bucket, self.function_url)
-            self.invoke_permission = allow_cloudfront_to_invoke(
-                self, self.answer_function, self.distribution
-            )
-            self.site_files = upload_the_page(self, self.site_bucket, self.distribution)
+        self.deploy_drain = create_deploy_drain(
+            self, self.answer_function, [self.guardrail_version, self.excerpt_guardrail_version]
+        )
 
         self._create_outputs()
 
     def _create_outputs(self) -> None:
         """Everything a script or a CLI call needs to address this stack."""
-        if self.distribution is not None:
-            CfnOutput(
-                self,
-                "WebUrl",
-                value=f"https://{self.distribution.distribution_domain_name}",
-                description=(
-                    f"The page. Questions go to <WebUrl>{ASK_PATH} with the header X-Andur-Key "
-                    "and the SHA-256 of the body in x-amz-content-sha256."
-                ),
-            )
-            CfnOutput(
-                self,
-                "FunctionUrl",
-                value=self.function_url.url,
-                description=(
-                    "The function's own address. Set to AWS_IAM: from outside this account "
-                    "only CloudFront may invoke it, while a role in this account can sign a "
-                    f"call itself. Ask through <WebUrl>{ASK_PATH}."
-                ),
-            )
-        else:
-            CfnOutput(
-                self,
-                "WebUrl",
-                value=self.function_url.url,
-                description=(
-                    "The page, served by the answer function at its own URL in this region, "
-                    f"without CloudFront. Questions go to <WebUrl>{ASK_PATH.lstrip('/')} with "
-                    "the header X-Andur-Key."
-                ),
-            )
+        CfnOutput(
+            self,
+            "WebUrl",
+            value=self.function_url.url,
+            description=(
+                "The page, served by the answer function at its own URL in this region, "
+                f"without CloudFront. Questions go to <WebUrl>{ASK_PATH.lstrip('/')} with "
+                "the header X-Andur-Key."
+            ),
+        )
         CfnOutput(
             self,
             "GuardrailVersion",
@@ -223,26 +122,15 @@ class SvarStack(Stack):
             value=self.excerpt_guardrail_version.ref,
             description="The guardrail that masks the sources' excerpts, as <id>|<version>.",
         )
-        if self.topic_guardrail_version is not None:
-            CfnOutput(
-                self,
-                "TopicGuardrailRef",
-                value=self.topic_guardrail_version.ref,
-                description=(
-                    "The guardrail that checks the question, and the answer without its "
-                    "citations, for the denied topics, as <id>|<version>."
-                ),
-            )
-        else:
-            CfnOutput(
-                self,
-                "TopicModelId",
-                value=self.topic_model_id,
-                description=(
-                    "The model that checks the question and the answer for the denied topics, "
-                    "in this region."
-                ),
-            )
+        CfnOutput(
+            self,
+            "TopicModelId",
+            value=self.topic_model_id,
+            description=(
+                "The model that checks the question and the answer for the denied topics, "
+                "in this region."
+            ),
+        )
         CfnOutput(
             self,
             "BudgetTableName",

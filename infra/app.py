@@ -44,8 +44,8 @@ ENVIRONMENT = cdk.Environment(account=os.environ.get("CDK_DEFAULT_ACCOUNT"), reg
 taug = TaugStack(app, TAUG_STACK_NAME, description=TAUG_DESCRIPTION, env=ENVIRONMENT)
 
 # Svar keeps the stack name it was deployed under, so its function, address and page stay
-# where they are; Taug's parts move out of it into TaugStack (docs/decisions.md). Its models,
-# guardrails and address come from REGION's row of the model table; the stack refuses a
+# where they are; Taug's parts move out of it into TaugStack (docs/decisions.md). Its models
+# and grounding threshold come from REGION's row of the model table; the stack refuses a
 # region without one.
 svar = SvarStack(
     app,
