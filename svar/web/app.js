@@ -269,7 +269,7 @@ async function submit(event) {
     say(() => t("question_too_long", { max: MAX_QUESTION_CHARACTERS }), "warn");
     return;
   }
-  // The key goes out only over HTTPS (a secure context).
+  // The key goes out only from a secure context: HTTPS, or a page on this very machine.
   if (!window.isSecureContext) {
     say(() => t("need_https"), "warn");
     return;
