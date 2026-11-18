@@ -23,16 +23,15 @@ MAX_PRICE_PER_THOUSAND = Decimal(10)
 
 @dataclass(frozen=True)
 class Prices:
-    """USD per 1,000 tokens of the answering model, or per 1,000 guardrail text units."""
+    """USD per 1,000 tokens of the answering model and of the topic model, or per 1,000
+    guardrail text units."""
 
     input_tokens: Decimal
     output_tokens: Decimal
-    topic_units: Decimal
     sensitive_information_units: Decimal
     grounding_units: Decimal
-    #: The topic model's tokens, where a model checks the topics; 0 where a guardrail does.
-    topic_model_input_tokens: Decimal = Decimal(0)
-    topic_model_output_tokens: Decimal = Decimal(0)
+    topic_model_input_tokens: Decimal
+    topic_model_output_tokens: Decimal
 
 
 @dataclass(frozen=True)
@@ -52,18 +51,15 @@ class Settings:
     guardrail_version: str
     excerpt_guardrail_id: str
     excerpt_guardrail_version: str
-    #: Either the topic guardrail and its version, or the topic model; never both.
-    topic_guardrail_id: str | None
-    topic_guardrail_version: str | None
+    #: The model that checks the denied topics, in the region.
+    topic_model_id: str
     prices: Prices
     price_date: str
-    topic_model_id: str | None = None
+    #: The folder of the page's files, which the function serves (page.py).
+    page_folder: str
     #: The wording of the system prompt (`prompts.PROMPTS`): the answer model's own, a column of
     #: the table in infra/answer_models.py.
     answer_prompt: str = prompts.DEFAULT_PROMPT
-    #: Where the function serves the page itself and is the address, without CloudFront in
-    #: front of it: the folder of the page's files (page.py). None behind CloudFront.
-    page_folder: str | None = None
 
 
 #: Environment variable for each setting. The stack sets all of them.
@@ -83,18 +79,13 @@ ENVIRONMENT_VARIABLES = {
     "excerpt_guardrail_version": "EXCERPT_GUARDRAIL_VERSION",
     "price_input_tokens": "PRICE_INPUT_PER_1K_TOKENS",
     "price_output_tokens": "PRICE_OUTPUT_PER_1K_TOKENS",
-    "price_topic_units": "PRICE_TOPIC_PER_1K_UNITS",
     "price_sensitive_information_units": "PRICE_PII_PER_1K_UNITS",
     "price_grounding_units": "PRICE_GROUNDING_PER_1K_UNITS",
     "price_date": "PRICE_DATE",
 }
 
-#: The settings of each way to check the topics: the stack sets the one or the other. The topic
-#: model is set where no guardrail that reads German stays in the region (infra/answer_models.py).
-TOPIC_GUARDRAIL_VARIABLES = {
-    "topic_guardrail_id": "TOPIC_GUARDRAIL_ID",
-    "topic_guardrail_version": "TOPIC_GUARDRAIL_VERSION",
-}
+#: The settings of the topic check: the model, in the region, and its prices
+#: (infra/answer_models.py).
 TOPIC_MODEL_VARIABLES = {
     "topic_model_id": "TOPIC_MODEL_ID",
     "price_topic_model_input_tokens": "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS",
@@ -105,8 +96,7 @@ TOPIC_MODEL_VARIABLES = {
 #: `scripts/evaluate.py` reads the deployed environment and sets the prompt of each model itself.
 ANSWER_PROMPT_VARIABLE = "ANSWER_PROMPT"
 
-#: Set only where the function is the address itself (infra/answer_models.py): then it serves
-#: the page from this folder, and no CloudFront waits in front of it.
+#: The folder the function serves the page from.
 PAGE_VARIABLES = {"page_folder": page.PAGE_FOLDER_VARIABLE}
 
 
@@ -143,24 +133,11 @@ def price_day(text: str) -> str:
     return text
 
 
-def topic_check_variables(environ: Mapping[str, str]) -> dict[str, str]:
-    """The variables of the one way to check the topics the environment sets: the topic model
-    once ``TOPIC_MODEL_ID`` is set, else the topic guardrail; both at once is refused."""
-    if not environ.get("TOPIC_MODEL_ID", "").strip():
-        return TOPIC_GUARDRAIL_VARIABLES
-    both = [name for name in TOPIC_GUARDRAIL_VARIABLES.values() if environ.get(name, "").strip()]
-    if both:
-        raise errors.ConfigurationError(
-            f"TOPIC_MODEL_ID and {', '.join(both)} are both set: the topics are checked by the "
-            "topic model or by the topic guardrail, not by both."
-        )
-    return TOPIC_MODEL_VARIABLES
-
-
 def load_settings(environ: Mapping[str, str]) -> Settings:
     """Read and check the settings; no network call."""
     values: dict[str, str] = {}
-    for name, variable in {**ENVIRONMENT_VARIABLES, **topic_check_variables(environ)}.items():
+    variables = {**ENVIRONMENT_VARIABLES, **TOPIC_MODEL_VARIABLES, **PAGE_VARIABLES}
+    for name, variable in variables.items():
         value = environ.get(variable, "").strip()
         if not value:
             raise errors.ConfigurationError(f"The environment variable {variable} is not set.")
@@ -188,37 +165,24 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
             f"{ANSWER_PROMPT_VARIABLE} must be one of {', '.join(prompts.PROMPTS)}, "
             f"not {answer_prompt!r}."
         )
-    variables = {**ENVIRONMENT_VARIABLES, **TOPIC_GUARDRAIL_VARIABLES}
-    for name in ("guardrail_version", "excerpt_guardrail_version", "topic_guardrail_version"):
-        if name in values and not (values[name].isascii() and values[name].isdigit()):
+    for name in ("guardrail_version", "excerpt_guardrail_version"):
+        if not (values[name].isascii() and values[name].isdigit()):
             raise errors.ConfigurationError(
                 f"{variables[name]} must be a version number, not {values[name]!r}."
             )
-    topic_model_prices = {
-        field_name: price(variable, values[name])
-        for field_name, name, variable in (
-            (
-                "topic_model_input_tokens",
-                "price_topic_model_input_tokens",
-                "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS",
-            ),
-            (
-                "topic_model_output_tokens",
-                "price_topic_model_output_tokens",
-                "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS",
-            ),
-        )
-        if name in values
-    }
     prices = Prices(
         input_tokens=price("PRICE_INPUT_PER_1K_TOKENS", values["price_input_tokens"]),
         output_tokens=price("PRICE_OUTPUT_PER_1K_TOKENS", values["price_output_tokens"]),
-        topic_units=price("PRICE_TOPIC_PER_1K_UNITS", values["price_topic_units"]),
         sensitive_information_units=price(
             "PRICE_PII_PER_1K_UNITS", values["price_sensitive_information_units"]
         ),
         grounding_units=price("PRICE_GROUNDING_PER_1K_UNITS", values["price_grounding_units"]),
-        **topic_model_prices,
+        topic_model_input_tokens=price(
+            "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS", values["price_topic_model_input_tokens"]
+        ),
+        topic_model_output_tokens=price(
+            "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS", values["price_topic_model_output_tokens"]
+        ),
     )
 
     return Settings(
@@ -235,11 +199,9 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         guardrail_version=values["guardrail_version"],
         excerpt_guardrail_id=values["excerpt_guardrail_id"],
         excerpt_guardrail_version=values["excerpt_guardrail_version"],
-        topic_guardrail_id=values.get("topic_guardrail_id"),
-        topic_guardrail_version=values.get("topic_guardrail_version"),
+        topic_model_id=values["topic_model_id"],
         prices=prices,
         price_date=price_day(values["price_date"]),
-        topic_model_id=values.get("topic_model_id"),
+        page_folder=values["page_folder"],
         answer_prompt=answer_prompt,
-        page_folder=environ.get(page.PAGE_FOLDER_VARIABLE, "").strip() or None,
     )

@@ -47,7 +47,6 @@ from svar.infra.answer_function import (
     PRICE_INPUT_PER_1K_TOKENS,
     PRICE_OUTPUT_PER_1K_TOKENS,
     PRICE_PII_PER_1K_UNITS,
-    PRICE_TOPIC_PER_1K_UNITS,
     WEB_FOLDER,
 )
 from svar.infra.guardrails import (
@@ -636,13 +635,8 @@ def test_timeouts_nest_from_aws_calls_to_function_to_ask_script() -> None:
     three times, for the topic checks of the question and the answer and for the
     excerpts.
     """
-    assert aws.worst_case_seconds(behind_cloudfront=False) == 190
-    assert (
-        aws.worst_case_seconds(behind_cloudfront=False)
-        < ANSWER_TIMEOUT_SECONDS
-        < ask.HTTP_TIMEOUT_SECONDS
-        < 900
-    )
+    assert aws.worst_case_seconds() == 190
+    assert aws.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < ask.HTTP_TIMEOUT_SECONDS < 900
 
 
 def test_every_caller_outlasts_the_function() -> None:
@@ -653,7 +647,7 @@ def test_every_caller_outlasts_the_function() -> None:
     assert aws.FUNCTION_TIMEOUT_SECONDS == ANSWER_TIMEOUT_SECONDS
     assert aws.PAGE_TIMEOUT_SECONDS > ANSWER_TIMEOUT_SECONDS
     assert ask.HTTP_TIMEOUT_SECONDS > ANSWER_TIMEOUT_SECONDS
-    assert aws.caller_deadline_seconds(behind_cloudfront=False) == ANSWER_TIMEOUT_SECONDS
+    assert aws.caller_deadline_seconds() == ANSWER_TIMEOUT_SECONDS
 
 
 def test_answer_function_runs_at_most_a_few_requests_at_once(
@@ -694,7 +688,6 @@ def test_answer_function_is_configured_only_through_its_environment(
         "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": TOPIC_MODEL.output_per_1k,
         "PRICE_INPUT_PER_1K_TOKENS": FRANKFURT_MODEL.input_per_1k,
         "PRICE_OUTPUT_PER_1K_TOKENS": FRANKFURT_MODEL.output_per_1k,
-        "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
         "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
         "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
         "PRICE_DATE": FRANKFURT_PRICE_DATE,
@@ -1000,7 +993,6 @@ def test_the_page_and_the_stack_mean_the_same_path_and_the_same_headers() -> Non
     """
     assert page_constant("ASK_PATH") == ASK_PATH
     assert page_constant("KEY_HEADER") == intake.KEY_HEADER
-    assert page_constant("BODY_HASH_HEADER") == ask.BODY_HASH_HEADER
     assert page_number("MAX_QUESTION_CHARACTERS") == intake.MAX_QUESTION_CHARACTERS
 
 
@@ -1094,7 +1086,6 @@ def test_the_defaults_the_stack_hands_over_are_a_budget_the_handler_accepts() ->
             "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": TOPIC_MODEL.output_per_1k,
             "PRICE_INPUT_PER_1K_TOKENS": PRICE_INPUT_PER_1K_TOKENS,
             "PRICE_OUTPUT_PER_1K_TOKENS": PRICE_OUTPUT_PER_1K_TOKENS,
-            "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
             "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
             "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
             "PRICE_DATE": FRANKFURT_PRICE_DATE,
@@ -1333,7 +1324,6 @@ def test_the_prices_are_ones_the_handler_accepts_and_dated() -> None:
     for value in (
         PRICE_INPUT_PER_1K_TOKENS,
         PRICE_OUTPUT_PER_1K_TOKENS,
-        PRICE_TOPIC_PER_1K_UNITS,
         PRICE_PII_PER_1K_UNITS,
         PRICE_GROUNDING_PER_1K_UNITS,
     ):

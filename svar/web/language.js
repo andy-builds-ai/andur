@@ -72,8 +72,7 @@ const TEXTS = {
     need_question: "Type a question.",
     question_too_long: "A question is at most {max} characters.",
     need_https:
-      "This page needs an https connection: without one the browser withholds the hashing "
-      + "a signed request needs.",
+      "This page needs an https connection: without one the key would travel readable.",
     key_forgotten: "The key is gone from this browser. The workspace is kept.",
     ask_for_a_new_key: " Ask whoever sent you this link for a new one.",
     problem_busy:
@@ -139,8 +138,7 @@ const TEXTS = {
     need_question: "Geben Sie eine Frage ein.",
     question_too_long: "Eine Frage hat höchstens {max} Zeichen.",
     need_https:
-      "Diese Seite braucht eine https-Verbindung: Ohne sie stellt der Browser die Prüfsumme "
-      + "nicht bereit, die eine signierte Anfrage braucht.",
+      "Diese Seite braucht eine https-Verbindung: Ohne sie ginge der Schlüssel lesbar übers Netz.",
     key_forgotten: "Der Schlüssel ist aus diesem Browser gelöscht. Der Arbeitsbereich bleibt.",
     ask_for_a_new_key:
       " Bitten Sie den, der Ihnen diesen Link geschickt hat, um einen neuen Schlüssel.",

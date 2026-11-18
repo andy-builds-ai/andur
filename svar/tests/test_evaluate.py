@@ -274,8 +274,8 @@ def test_a_refusal_or_unanswerable_question_is_right_when_svar_declines(
 
 
 def test_settings_for_a_model_change_only_the_model_its_prompt_and_its_token_prices() -> None:
-    prices = config.Prices(*(Decimal("0.1") for _ in range(5)))
-    base = config.Settings(*(["x"] * 15), prices=prices, price_date="2026-01-01")
+    prices = config.Prices(*(Decimal("0.1") for _ in range(6)))
+    base = config.Settings(*(["x"] * 14), prices=prices, price_date="2026-01-01", page_folder="x")
     # The wording comes with the model's name (svar/infra/answer_prompts.py).
     model = AnswerModel("Nova Pro", "eu.m", "0.001", "0.002")
     settings = evaluate.settings_for(base, model, "2026-10-06")
@@ -284,7 +284,7 @@ def test_settings_for_a_model_change_only_the_model_its_prompt_and_its_token_pri
     assert settings.answer_prompt == "sentence-first"
     assert settings.prices.input_tokens == Decimal("0.001")
     assert settings.prices.output_tokens == Decimal("0.002")
-    assert settings.prices.topic_units == Decimal("0.1")
+    assert settings.prices.sensitive_information_units == Decimal("0.1")
     assert settings.price_date == "2026-10-06"
     assert settings.knowledge_base_id == base.knowledge_base_id
 

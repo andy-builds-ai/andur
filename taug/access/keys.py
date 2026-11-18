@@ -22,9 +22,9 @@ KEY_MAX_AGE_SECONDS = 3 * KEY_CACHE_SECONDS
 KEY_RELOAD_MIN_SECONDS = 10
 
 #: Reads per `KEY_RELOAD_MIN_SECONDS` and function instance for workspaces it holds
-#: no key for. Five instances (Ireland's cap) at this rate are 5 reads a second, an eighth
-#: of the 40 a second the account's Parameter Store allows by default for all callers; ten
-#: (Frankfurt's reservation) are 10, a quarter.
+#: no key for. Ten instances (the function's reservation) at this rate are 10 reads a second,
+#: a quarter of the 40 a second the account's Parameter Store allows by default for all
+#: callers.
 UNKNOWN_KEY_READS = 10
 
 #: Reads per `KEY_RELOAD_MIN_SECONDS` and function instance because a presented key

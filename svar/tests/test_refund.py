@@ -175,14 +175,14 @@ def test_a_timeout_of_the_first_topic_call_stays_in_the_chain_when_the_next_one_
 
     settings = config.load_settings(
         {
-            **{k: v for k, v in ENVIRONMENT.items() if not k.startswith("TOPIC_GUARDRAIL_")},
+            **ENVIRONMENT,
             "TOPIC_MODEL_ID": "openai.gpt-oss-120b-1:0",
             "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS": "0.0002",
             "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": "0.00079",
         }
     )
     with pytest.raises(errors.TopicCheckError) as failed:
-        topic_check.check_topics_with_model(Runtime(), settings, "INPUT", "Wie exportiere ich?")
+        topic_check.check_topics(Runtime(), settings, "INPUT", "Wie exportiere ich?")
     assert aws_module.timed_out(failed.value)
     assert "too many requests" in str(failed.value)
 

@@ -68,11 +68,10 @@ PACKAGE_EXCLUDES = tuple(pattern.removeprefix("**/") for pattern in ASSET_EXCLUD
 #: USD per 1,000 tokens or guardrail text units, standard tier: the AWS Price
 #: List API behind aws.amazon.com/bedrock/pricing, read on the region's price
 #: date in taug/infra/answer_models.py. The token prices here are the default
-#: model's; a stack takes its own model's from its region's table. The three
+#: model's; a stack takes its own model's from its region's table. The two
 #: guardrail prices are eu-central-1's (price list of 06.10.2026).
 PRICE_INPUT_PER_1K_TOKENS = answer_model(ANSWER_MODEL_ID).input_per_1k
 PRICE_OUTPUT_PER_1K_TOKENS = answer_model(ANSWER_MODEL_ID).output_per_1k
-PRICE_TOPIC_PER_1K_UNITS = "0.15"
 PRICE_PII_PER_1K_UNITS = "0.10"
 PRICE_GROUNDING_PER_1K_UNITS = "0.10"
 
@@ -353,7 +352,6 @@ def create_answer_function(
             "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": stack.topic_model.output_per_1k,
             "PRICE_INPUT_PER_1K_TOKENS": stack.answer_model.input_per_1k,
             "PRICE_OUTPUT_PER_1K_TOKENS": stack.answer_model.output_per_1k,
-            "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
             "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
             "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
             "PRICE_DATE": stack.models.price_date,

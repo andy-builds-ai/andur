@@ -1,6 +1,5 @@
 """Tests for the ask script, without AWS and without the network."""
 
-import hashlib
 import http.client
 import io
 import json
@@ -15,7 +14,8 @@ from taug.scripts.aws import AwsProblem
 
 KEY = "a-secret-workspace-key-that-must-never-be-printed"
 
-WEB_URL = "https://d111111abcdef8.cloudfront.net"
+#: The function's own URL, which is the address (`WebUrl`).
+WEB_URL = "https://abcdefghij0123456789klmnopqrst.lambda-url.eu-central-1.on.aws"
 ASK_URL = WEB_URL + "/ask"
 
 ANSWER = {
@@ -89,11 +89,6 @@ def test_the_language_goes_in_the_body_only_when_given() -> None:
         "workspace": "quillmoor",
         "language": "de",
     }
-    # The hash is of the body that is sent, the language included.
-    assert (
-        german.get_header(ask.BODY_HASH_HEADER.capitalize())
-        == hashlib.sha256(german.data).hexdigest()
-    )
 
     for none in (None, ""):
         plain = ask.build_request(ASK_URL, KEY, "How?", "quillmoor", none)
@@ -108,13 +103,12 @@ def test_the_language_option_takes_german_or_english_and_nothing_else() -> None:
         ask.parse_args(["Wie?", "--workspace", "quillmoor", "--language", "fr"])
 
 
-def test_the_body_hash_header_is_the_hash_of_the_body_that_is_sent() -> None:
-    """CloudFront signs the request, and a signed call to a function URL needs the hash."""
+def test_the_request_carries_the_key_and_the_content_type_and_nothing_else() -> None:
     request = ask.build_request(ASK_URL, KEY, "How?", "quillmoor")
-    assert isinstance(request.data, bytes)
-    expected = hashlib.sha256(request.data).hexdigest()
-    assert len(expected) == 64
-    assert request.get_header(ask.BODY_HASH_HEADER.capitalize()) == expected
+    assert dict(request.header_items()) == {
+        ask.KEY_HEADER.capitalize(): KEY,
+        "Content-type": "application/json",
+    }
 
 
 @pytest.mark.parametrize("given", [WEB_URL, WEB_URL + "/"])
@@ -148,10 +142,10 @@ def test_send_returns_the_error_body_of_a_refused_request(monkeypatch: pytest.Mo
     )
 
 
-def test_a_cloudfront_error_page_is_reported_as_what_came_instead(
+def test_an_error_page_is_reported_as_what_came_instead(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A 403 or 504 from CloudFront never passed through the function, so it has no sentence."""
+    """An error page that did not come from the function's code has no sentence."""
 
     def refuse(*_: Any, **__: Any) -> Any:
         raise http_error(504, b"<!DOCTYPE HTML><html><head><title>ERROR</title>")
@@ -231,7 +225,7 @@ def test_a_connection_that_breaks_while_waiting_is_a_readable_problem(
     monkeypatch: pytest.MonkeyPatch, broken: Exception
 ) -> None:
     """urllib wraps only the errors of sending; these come from reading the response, which
-    may take up to 195 seconds without CloudFront."""
+    may take up to 195 seconds."""
 
     def breaks(*_: Any, **__: Any) -> Any:
         raise broken
@@ -306,13 +300,6 @@ def test_main_asks_the_web_address_and_never_prints_the_key(
     output = capsys.readouterr()
     assert "Open Settings > Export [1]." in output.out
     assert KEY not in output.out + output.err
-
-
-def test_the_function_url_output_is_not_what_the_script_asks(deployed: dict[str, Any]) -> None:
-    """The function URL answers 403 to everyone but CloudFront; the script must not go there."""
-    assert ask.main(["How?", "--workspace", "quillmoor"]) == 0
-    (request,) = deployed["requests"]
-    assert "lambda-url" not in request.full_url
 
 
 def test_main_json_prints_the_raw_response(

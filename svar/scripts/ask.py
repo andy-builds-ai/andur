@@ -1,7 +1,6 @@
 """Ask Svar a question through the web address and print the answer with its sources."""
 
 import argparse
-import hashlib
 import http.client
 import json
 import os
@@ -38,8 +37,6 @@ ASK_PATH = "/ask"
 
 #: The header the workspace key travels in — ``KEY_HEADER`` in taug/access/workspaces.py.
 KEY_HEADER = "X-Andur-Key"
-
-BODY_HASH_HEADER = "x-amz-content-sha256"
 
 HTTP_TIMEOUT_SECONDS = 200
 
@@ -85,8 +82,8 @@ def ask_url(web_url: str) -> str:
 def build_request(
     url: str, key: str, question: str, workspace: str, language: str | None = None
 ) -> urllib.request.Request:
-    """The POST the way in expects: JSON, the key header, and the body's hash. The language
-    goes in only when given; without it Svar answers in English."""
+    """The POST the way in expects: JSON and the key header. The language goes in only when
+    given; without it Svar answers in English."""
     fields = {"question": question, "workspace": workspace}
     if language:
         fields["language"] = language
@@ -97,7 +94,6 @@ def build_request(
         headers={
             KEY_HEADER: key,
             "Content-Type": "application/json",
-            BODY_HASH_HEADER: hashlib.sha256(body).hexdigest(),
         },
         method="POST",
     )

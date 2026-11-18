@@ -1,6 +1,5 @@
 """The function as its own address (svar/app/page.py): the page, the way to /ask, the headers."""
 
-import dataclasses
 import json
 import logging
 from pathlib import Path
@@ -16,6 +15,7 @@ import page
 import pytest
 
 from svar.tests.test_handler import (  # noqa: F401 (aws and cold_start are fixtures)
+    ENVIRONMENT,
     SETTINGS,
     FakeClock,
     SequencedBedrockRuntime,
@@ -144,37 +144,38 @@ def test_a_page_that_cannot_be_read_is_a_500_not_a_crash(
     assert [line for line in log_lines(caplog) if line["event"] == "crashed"]
 
 
-def test_behind_cloudfront_the_function_answers_as_before(aws: dict[str, Any]) -> None:  # noqa: F811
-    """Without the page folder, every path is a question, as CloudFront sends only /ask, and
-    CloudFront sets the headers."""
-    response = handler.handler(event(rawPath="/"), None)
-    assert response["statusCode"] == 200
-    assert "answer" in json.loads(response["body"])
-    assert "Content-Security-Policy" not in response["headers"]
+def test_without_its_page_folder_the_function_answers_nothing(
+    aws: dict[str, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The stack always sets the folder; a function without it is not configured, and asks no
+    model."""
+    caplog.set_level(logging.INFO, logger="andur")
+    monkeypatch.delenv(page.PAGE_FOLDER_VARIABLE)
+    response = handler.handler(event(), None)
+    assert response["statusCode"] == 500
+    assert page.SECURITY_HEADERS.items() <= response["headers"].items()
+    assert aws["bedrock-runtime"].calls == []
+    without = {name: value for name, value in ENVIRONMENT.items() if name != "PAGE_FOLDER"}
+    with pytest.raises(errors.ConfigurationError, match="PAGE_FOLDER"):
+        config.load_settings(without)
 
 
-def test_the_page_folder_is_a_setting_only_where_the_function_is_the_address() -> None:
+def test_the_page_folder_is_a_setting() -> None:
     assert config.PAGE_VARIABLES == {"page_folder": "PAGE_FOLDER"}
-    assert SETTINGS.page_folder is None
+    assert SETTINGS.page_folder == str(WEB_FOLDER)
 
 
-@pytest.mark.parametrize(("page_folder", "retried"), [(None, False), ("/opt", True)])
-def test_a_second_model_call_may_start_later_without_cloudfront(
+def test_a_second_model_call_may_start_at_second_100(
     cold_start: FakeClock,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
-    page_folder: str | None,
-    retried: bool,
 ) -> None:
-    """At second 100 the second call still ends inside the function's 195 seconds, not before
-    CloudFront's 120 (svar/app/aws.py)."""
+    """At second 100 the second call still ends inside the function's 195 seconds
+    (svar/app/aws.py)."""
     monkeypatch.setattr(clocks, "pause", lambda seconds: None)
-    settings = dataclasses.replace(SETTINGS, page_folder=page_folder)
     bedrock = SequencedBedrockRuntime([client_error("ThrottlingException")])
     record = log.RequestRecord()
     cold_start.advance(100)
-    if retried:
-        assert llm.ask_model(bedrock, settings, [{"text": "p"}], record) == bedrock.response
-    else:
-        with pytest.raises(errors.LLMError):
-            llm.ask_model(bedrock, settings, [{"text": "p"}], record)
-    assert len(bedrock.calls) == (2 if retried else 1)
+    assert llm.ask_model(bedrock, SETTINGS, [{"text": "p"}], record) == bedrock.response
+    assert len(bedrock.calls) == 2

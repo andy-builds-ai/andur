@@ -8,8 +8,8 @@ import config
 
 COST_DECIMAL_PLACES = 6
 
+#: The guardrail units the answer and excerpt guardrails are billed by; neither reads topics.
 PRICED_UNITS = {
-    "topicPolicyUnits": "topic_units",
     "sensitiveInformationPolicyUnits": "sensitive_information_units",
     "contextualGroundingPolicyUnits": "grounding_units",
 }

@@ -326,7 +326,6 @@ ENVIRONMENT = {
     "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": "0.00079",
     "PRICE_INPUT_PER_1K_TOKENS": "0.00029",
     "PRICE_OUTPUT_PER_1K_TOKENS": "0.00116",
-    "PRICE_TOPIC_PER_1K_UNITS": "0.15",
     "PRICE_PII_PER_1K_UNITS": "0.10",
     "PRICE_GROUNDING_PER_1K_UNITS": "0.10",
     "PRICE_DATE": "2026-10-06",
@@ -416,9 +415,9 @@ def test_the_cost_of_a_run_counts_both_checks_and_the_translation(
     out = tmp_path / "out.json"
     run_main(monkeypatch, tmp_path, FakeBedrock(), FakeRuntime(), "--out", str(out))
     rows = {row["id"]: row for row in json.loads(out.read_text(encoding="utf-8"))["rows"]}
-    # Two checks of 2 grounding and 1 PII units each, and a translation of 110 tokens in, 40
-    # out and 1 topic unit.
-    expected = (110 * 0.00029 + 40 * 0.00116 + 1 * 0.15 + 4 * 0.10 + 2 * 0.10) / 1000
+    # Two checks of 2 grounding and 1 PII units each, and a translation of 110 tokens in and
+    # 40 out.
+    expected = (110 * 0.00029 + 40 * 0.00116 + 4 * 0.10 + 2 * 0.10) / 1000
     assert rows["r1"]["cost_usd"] == round(expected, 6)
     assert rows["k1"]["cost_usd"] == round((2 * 0.10 + 1 * 0.10) / 1000, 6)
 

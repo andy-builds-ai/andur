@@ -1,22 +1,12 @@
 /* Svar — the page.
  *
- * One address for everything: this page and the answer function share one
- * origin, so a question is a POST to /ask on this very origin. Behind
- * CloudFront (eu-west-1) the page comes from a bucket and /ask goes on to the
- * function; where the function is its own address (eu-central-1), it serves
- * this page itself. No other server is contacted, and nothing is loaded from
- * one.
+ * One address for everything: the answer function serves this page at its
+ * own URL, so a question is a POST to /ask on this very origin. No other
+ * server is contacted, and nothing is loaded from one.
  *
- * Three things the request needs:
+ * Two things the request needs:
  *   Content-Type: application/json
- *   X-Andur-Key:  the workspace key — not Authorization, because CloudFront
- *                 signs every request it forwards to the function and replaces
- *                 that header with its own signature.
- *   x-amz-content-sha256: the SHA-256 of the body, because a signed request to
- *                 a Lambda function URL may not carry an unsigned payload.
- *                 Where no CloudFront signs, nothing reads it, and it goes
- *                 along all the same: one page for both ways in.
- *                 crypto.subtle computes it; it is built into the browser.
+ *   X-Andur-Key:  the workspace key, in a header of its own.
  *
  * Nothing the function returns is ever inserted as markup. Every value goes
  * into a text node, so a document that contains angle brackets stays text.
@@ -32,17 +22,14 @@
 
 const ASK_PATH = "/ask";
 const KEY_HEADER = "X-Andur-Key";
-const BODY_HASH_HEADER = "x-amz-content-sha256";
 const MAX_QUESTION_CHARACTERS = 1000;
 
 /* How long this page waits before it gives up on its own: longer than the
- * function may run (195 seconds), so every answer it gives arrives. Where the
- * function is its own address, nothing between ends a request sooner, and the
- * function times a second model call by its own timeout (app/aws.py,
- * PAGE_TIMEOUT_SECONDS holds this number). Behind CloudFront, CloudFront stops
- * waiting after 120 seconds and sends a 504 first. Either way, this limit is
- * for a connection that neither answers nor fails, where without it the
- * button would show its asking label forever. */
+ * function may run (195 seconds), so every answer it gives arrives. Nothing
+ * between ends a request sooner, and the function times a second model call by
+ * its own timeout (app/aws.py, PAGE_TIMEOUT_SECONDS holds this number). This
+ * limit is for a connection that neither answers nor fails, where without it
+ * the button would show its asking label forever. */
 const REQUEST_TIMEOUT_MS = 200000;
 
 /* What the page remembers between visits. The key lives here and nowhere
@@ -167,22 +154,11 @@ function working(busy) {
 
 // --- The request -----------------------------------------------------------
 
-async function bodyHash(text) {
-  const bytes = new TextEncoder().encode(text);
-  const digest = await window.crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 async function ask(workspace, key, question) {
   const body = JSON.stringify({ question: question, workspace: workspace, language: language });
   const headers = {
     "Content-Type": "application/json",
     [KEY_HEADER]: key,
-    // The hash is of the exact bytes fetch will send: JSON.stringify gives the
-    // text, TextEncoder gives its UTF-8 bytes, and fetch encodes it the same.
-    [BODY_HASH_HEADER]: await bodyHash(body),
   };
 
   // A request that hangs is ended by this page rather than left running: the
@@ -208,7 +184,7 @@ async function ask(workspace, key, question) {
   try {
     payload = JSON.parse(raw);
   } catch (problem) {
-    payload = null; // CloudFront's and Lambda's own error pages are not this JSON.
+    payload = null; // Lambda's own error pages are not this JSON.
   }
   return { status: response.status, payload: payload };
 }
@@ -293,7 +269,8 @@ async function submit(event) {
     say(() => t("question_too_long", { max: MAX_QUESTION_CHARACTERS }), "warn");
     return;
   }
-  if (!window.crypto || !window.crypto.subtle) {
+  // The key goes out only over HTTPS (a secure context).
+  if (!window.isSecureContext) {
     say(() => t("need_https"), "warn");
     return;
   }

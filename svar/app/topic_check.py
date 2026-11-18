@@ -1,5 +1,5 @@
-"""The check of a question and of an answer for the denied topics, by the topic guardrail or by
-the topic model."""
+"""The check of a question and of an answer for the denied topics, by the topic model in the
+region."""
 
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -14,12 +14,13 @@ import llm
 import log
 import topic_model
 
-#: What the topic guardrail reads before the question and before the answer. Read alone, short
+#: What the topic check reads before the question and before the answer. Read alone, short
 #: questions and answers about the business's own invoices were refused as tax questions ("Wie
-#: viel Skonto darf ich abziehen, und bis wann muss ich dafür zahlen?"); after these words every
-#: harmless question and answer of the topic probe's sets but one passed, and every one to refuse
-#: was refused, in three runs (docs/decisions.md, 06.10.2026). The wording moves verdicts like a
-#: topic's definition does: measure a change with `python -m scripts.topic_probe`.
+#: viel Skonto darf ich abziehen, und bis wann muss ich dafür zahlen?") by the topic guardrail
+#: this check replaced; after these words every harmless question and answer of the topic
+#: probe's sets but one passed, and every one to refuse was refused, in three runs
+#: (docs/decisions.md, 06.10.2026). The wording moves verdicts like a topic's definition does:
+#: measure a change with `python -m svar.scripts.topic_probe`.
 QUESTION_FRAME = "Customer to business: "
 ANSWER_FRAME = "Answer from the business to a customer: "
 
@@ -45,36 +46,30 @@ TOPIC_CHECK_FAILED = {
 
 
 def question_for_topics(question: str) -> str:
-    """The question as the topic guardrail reads it: after `QUESTION_FRAME`."""
+    """The question as the topic check reads it: after `QUESTION_FRAME`."""
     return QUESTION_FRAME + question
 
 
 def answer_for_topics(answer: str) -> str:
-    """The answer as the topic guardrail reads it: without its citations, after
+    """The answer as the topic check reads it: without its citations, after
     `ANSWER_FRAME`; empty when nothing but citations is left."""
     text = citations.without_citations(answer)
     return ANSWER_FRAME + text if text else ""
 
 
-def check_question_topics(
-    guardrail_client: Any, settings: config.Settings, question: str
-) -> dict[str, Any]:
-    """The denied topics the question asks about, and the topic units of the check.
+def check_question_topics(runtime: Any, settings: config.Settings, question: str) -> dict[str, Any]:
+    """The denied topics the question asks about, and the topic model's tokens.
 
-    Checked by the topic guardrail as INPUT, or by the topic model, after `QUESTION_FRAME`,
-    before the model is asked.
-    The answer guardrail on the model call reads no topic (`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS`
-    in the stack is False). A failed check answers nothing: the question is not asked
+    Checked as INPUT after `QUESTION_FRAME`, before the model is asked. The answer guardrail on
+    the model call reads no topic. A failed check answers nothing: the question is not asked
     unchecked.
     """
-    return check_topics(guardrail_client, settings, "INPUT", question_for_topics(question))
+    return check_topics(runtime, settings, "INPUT", question_for_topics(question))
 
 
-def check_answer_topics(
-    guardrail_client: Any, settings: config.Settings, answer: str
-) -> dict[str, Any]:
+def check_answer_topics(runtime: Any, settings: config.Settings, answer: str) -> dict[str, Any]:
     """The denied topics the answer strays into, checked without its citations, and the topic
-    units of the check.
+    model's tokens.
 
     The answer guardrail on the model call does not read the answer's topics: in the answer as
     the model writes it, `Private lives` withheld short harmless answers for their citations
@@ -83,15 +78,13 @@ def check_answer_topics(
     """
     text = answer_for_topics(answer)
     if not text:
-        return {"topics": [], "units": 0}
-    return check_topics(guardrail_client, settings, "OUTPUT", text)
+        return {"topics": []}
+    return check_topics(runtime, settings, "OUTPUT", text)
 
 
 def topic_client(settings: config.Settings) -> Any:
-    """The client of the way the topics are checked: the topic model's or the guardrail's."""
-    return clients.client(
-        "topic-model" if settings.topic_model_id else "guardrail", settings.region
-    )
+    """The topic model's client."""
+    return clients.client("topic-model", settings.region)
 
 
 def topic_check_failed(source: str, cause: str, german_cause: str) -> errors.TopicCheckError:
@@ -104,43 +97,8 @@ def topic_check_failed(source: str, cause: str, german_cause: str) -> errors.Top
     return error
 
 
-def check_topics(
-    guardrail_client: Any, settings: config.Settings, source: str, text: str
-) -> dict[str, Any]:
-    """The denied topics the topic guardrail, or the topic model, finds in ``text``, read as
-    ``source``, and the topic units of the call. A failed guardrail call raises
-    `TopicCheckError`; so does the topic model once the call in place of a failed or unreadable
-    first call gives no verdict either (`check_topics_with_model`): what cannot be checked is
-    not let through."""
-    if settings.topic_model_id:
-        return check_topics_with_model(guardrail_client, settings, source, text)
-    try:
-        response = guardrail_client.apply_guardrail(
-            guardrailIdentifier=settings.topic_guardrail_id,
-            guardrailVersion=settings.topic_guardrail_version,
-            source=source,
-            content=[{"text": {"text": text}}],
-        )
-    except aws.botocore_errors() as exc:
-        log.log_event("topic-guard-failed", source=source, detail=aws.error_detail(exc))
-        cause = aws.error_cause(exc)
-        raise topic_check_failed(source, cause, cause) from exc
-    topics = [
-        f"topic:{topic.get('name')}"
-        for assessment in response.get("assessments", [])
-        for topic in assessment.get("topicPolicy", {}).get("topics", [])
-        if topic.get("action") == "BLOCKED"
-    ]
-    if response.get("action") == "GUARDRAIL_INTERVENED" and not topics:
-        topics = ["topic:unknown"]
-    units = response.get("usage", {}).get("topicPolicyUnits")
-    return {"topics": list(dict.fromkeys(topics)), "units": None if units is None else int(units)}
-
-
-def check_topics_with_model(
-    runtime: Any, settings: config.Settings, source: str, text: str
-) -> dict[str, Any]:
-    """`check_topics` by the topic model: no topic units, its tokens counted.
+def check_topics(runtime: Any, settings: config.Settings, source: str, text: str) -> dict[str, Any]:
+    """The denied topics the topic model finds in ``text``, read as ``source``, and its tokens.
 
     The first call decides when it names none. A topic it names is asked again by
     `topic_model.CONFIRMING_CALLS` calls at once, and stands unless every one of them names
@@ -148,9 +106,8 @@ def check_topics_with_model(
     now and then, as a single call (07.10.2026). A first call that fails or gives no verdict is
     replaced by one more call, which decides alone: a topic it names stands, since the time of
     the check (`aws.TOPIC_MODEL_ROUNDS_PER_CHECK`) leaves no round to confirm it; if it fails or
-    gives no verdict as well, the check refuses."""
+    gives no verdict as well, the check refuses: what cannot be checked is not let through."""
     model_id = settings.topic_model_id
-    assert model_id is not None
     tokens = {"input_tokens": 0, "output_tokens": 0}
 
     def ask(call: int) -> tuple[str | None, BaseException | None, dict[str, int]]:
@@ -180,7 +137,6 @@ def check_topics_with_model(
     def verdict(named: str) -> dict[str, Any]:
         return {
             "topics": [] if named == topic_model.NO_TOPIC else [f"topic:{named}"],
-            "units": 0,
             "tokens": tokens,
         }
 
@@ -215,7 +171,8 @@ def check_topics_with_model(
 
 
 def topic_tokens(*checks: Mapping[str, Any]) -> dict[str, int]:
-    """The topic model's tokens over the checks of one request; 0 where a guardrail checked."""
+    """The topic model's tokens over the checks of one request; 0 for a check of citations
+    alone, which calls no model."""
     return {
         kind: sum(check.get("tokens", {}).get(kind, 0) for check in checks)
         for kind in ("input_tokens", "output_tokens")

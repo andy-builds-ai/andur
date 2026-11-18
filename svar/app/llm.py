@@ -71,7 +71,7 @@ def ask_model(
             record.model_rejections += rejected
             if attempt == 1 and rejected:
                 elapsed = clocks.clock() - record.started
-                retry = elapsed <= aws.latest_model_retry_start(settings.page_folder is None)
+                retry = elapsed <= aws.latest_model_retry_start()
                 log.log_event(
                     "converse-rejected",
                     model=settings.model_id,

@@ -56,7 +56,7 @@ KEY_READS_PER_REQUEST = 1
 
 BUDGET_WRITES_PER_REQUEST = 2
 
-#: After the model call: the topic check of the answer, then the excerpts' masking. A topic
+#: After the model call: the topic check of the answer, then the excerpts' masking. The topic
 #: check by the topic model counts as a guardrail call: it takes no longer
 #: (`topic_check_fits_a_guardrail_call`).
 GUARDRAIL_CALLS_AFTER_MODEL = 2
@@ -64,16 +64,13 @@ GUARDRAIL_CALLS_AFTER_MODEL = 2
 #: Before the model call, the topic check of the question; then the two after it.
 GUARDRAIL_CALLS_PER_REQUEST = 1 + GUARDRAIL_CALLS_AFTER_MODEL
 
-#: How long CloudFront waits for an answer: `ORIGIN_RESPONSE_TIMEOUT_SECONDS` in the stack.
-ORIGIN_TIMEOUT_SECONDS = 120
-
 #: How long the page waits for an answer before it gives up itself: `REQUEST_TIMEOUT_MS` in
 #: web/app.js. Longer than the function may run, so the function is the first to end a
-#: request where no CloudFront stands in front of it.
+#: request.
 PAGE_TIMEOUT_SECONDS = 200
 
-#: How long the function may run: `ANSWER_TIMEOUT_SECONDS` in the stack. Without CloudFront
-#: nothing between the caller and the function ends a request sooner.
+#: How long the function may run: `ANSWER_TIMEOUT_SECONDS` in the stack. The function's URL is
+#: the address, so nothing between the caller and the function ends a request sooner.
 FUNCTION_TIMEOUT_SECONDS = 195
 
 #: The pause before the one second model call after AWS turned the first away.
@@ -105,16 +102,14 @@ def call_seconds(service: str) -> int:
     )
 
 
-def caller_deadline_seconds(behind_cloudfront: bool = True) -> int:
-    """How long the first to give up waits for an answer: CloudFront's 120 seconds behind
-    CloudFront; without it the function's own 195, which the page (200) and `scripts/ask.py`
-    (200) outlast. An answer later than that is lost, and its question counted."""
-    if behind_cloudfront:
-        return ORIGIN_TIMEOUT_SECONDS
+def caller_deadline_seconds() -> int:
+    """How long the first to give up waits for an answer: the function's own 195 seconds, which
+    the page (200) and `scripts/ask.py` (200) outlast. An answer later than that is lost, and
+    its question counted."""
     return min(PAGE_TIMEOUT_SECONDS, FUNCTION_TIMEOUT_SECONDS)
 
 
-def latest_model_retry_start(behind_cloudfront: bool = True) -> int:
+def latest_model_retry_start() -> int:
     """How far into a request the second model call may still start.
 
     After it come the pause, the model call and two guardrail calls (the topic
@@ -123,7 +118,7 @@ def latest_model_retry_start(behind_cloudfront: bool = True) -> int:
     handler cannot see.
     """
     return (
-        caller_deadline_seconds(behind_cloudfront)
+        caller_deadline_seconds()
         - ORIGIN_MARGIN_SECONDS
         - MODEL_RETRY_PAUSE_SECONDS
         - call_seconds("bedrock-runtime")
@@ -131,7 +126,7 @@ def latest_model_retry_start(behind_cloudfront: bool = True) -> int:
     )
 
 
-def worst_case_seconds(behind_cloudfront: bool = True) -> int:
+def worst_case_seconds() -> int:
     """How long one request can take when every AWS call runs into every timeout.
 
     A request with a second model call ends by `caller_deadline_seconds`, so it
@@ -141,14 +136,14 @@ def worst_case_seconds(behind_cloudfront: bool = True) -> int:
         "ssm": KEY_READS_PER_REQUEST,
         "dynamodb": BUDGET_WRITES_PER_REQUEST,
         "guardrail": GUARDRAIL_CALLS_PER_REQUEST,
-        # Its topic checks take the place of the topic guardrail's, counted under "guardrail".
+        # The topic model's checks, counted under "guardrail" (`topic_check_fits_a_guardrail_call`).
         "topic-model": 0,
         # Sent only while it still ends inside the function's time (refunds.py).
         "budget-refund": 0,
     }
     every_timeout = sum(calls.get(service, 1) * call_seconds(service) for service in CLIENT_LIMITS)
     with_model_retry = (
-        latest_model_retry_start(behind_cloudfront)
+        latest_model_retry_start()
         + MODEL_RETRY_PAUSE_SECONDS
         + call_seconds("bedrock-runtime")
         + GUARDRAIL_CALLS_AFTER_MODEL * call_seconds("guardrail")

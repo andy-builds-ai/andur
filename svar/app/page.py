@@ -1,10 +1,8 @@
-"""The page, where the function is its own address: no CloudFront in front of it.
+"""The page, served by the function at its own address.
 
-In a region whose stack has no CloudFront (`behind_cloudfront` in infra/answer_models.py), the
-function's URL is the one address of the page and of `ASK_PATH`. The page's files come with the
-function as a layer, in the folder `PAGE_FOLDER_VARIABLE` names; the function hands them out
-itself and sets on every response the headers CloudFront's response headers policy sets
-elsewhere. The stack builds that policy from the constants here, so the two cannot drift.
+The function's URL is the one address of the page and of `ASK_PATH`. The page's files come with
+the function as a layer, in the folder `PAGE_FOLDER_VARIABLE` names; the function hands them
+out itself and sets `SECURITY_HEADERS` on every response.
 """
 
 import functools
@@ -19,8 +17,7 @@ ASK_PATH = "/ask"
 #: The file the bare address serves.
 ROOT_DOCUMENT = "index.html"
 
-#: The environment variable that names the folder of the page's files. Set only where the
-#: function is the address itself; there, the function serves the page.
+#: The environment variable that names the folder of the page's files.
 PAGE_FOLDER_VARIABLE = "PAGE_FOLDER"
 
 CONTENT_SECURITY_POLICY = "; ".join(
@@ -38,7 +35,7 @@ CONTENT_SECURITY_POLICY = "; ".join(
 
 HSTS_MAX_AGE_DAYS = 730
 
-#: What every response carries, page and answer alike: the same values CloudFront's policy sets.
+#: What every response carries, page and answer alike.
 SECURITY_HEADERS = {
     "Content-Security-Policy": CONTENT_SECURITY_POLICY,
     "Strict-Transport-Security": f"max-age={HSTS_MAX_AGE_DAYS * 24 * 60 * 60}; includeSubDomains",

@@ -26,12 +26,8 @@ from svar.tests.test_handler import (  # noqa: F401 (aws and cold_start are fixt
     log_lines,
 )
 
-MODEL_ENVIRONMENT = {
-    **{k: v for k, v in ENVIRONMENT.items() if not k.startswith("TOPIC_GUARDRAIL_")},
-    "TOPIC_MODEL_ID": "openai.gpt-oss-20b-1:0",
-    "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS": "0.00009",
-    "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": "0.0004",
-}
+#: The function's environment, with gpt-oss-20b checking the topics.
+MODEL_ENVIRONMENT = ENVIRONMENT
 
 
 def verdict_response(reply: str | None, stop_reason: str = "end_turn") -> dict[str, Any]:
@@ -71,11 +67,9 @@ class FakeTopicModel:
 
 @pytest.fixture
 def model_aws(aws: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:  # noqa: F811
-    """The function as the stack in eu-central-1 sets it up: a topic model, no topic guardrail."""
-    for name in ("TOPIC_GUARDRAIL_ID", "TOPIC_GUARDRAIL_VERSION"):
-        monkeypatch.delenv(name)
-    for name, value in MODEL_ENVIRONMENT.items():
-        monkeypatch.setenv(name, value)
+    """The function as the stack sets it up, with a topic model that answers as told and
+    confirms a topic with its two calls (`topic_model.CONFIRMING_CALLS`)."""
+    monkeypatch.setattr(topic_model, "CONFIRMING_CALLS", 2)
     aws["topic-model"] = FakeTopicModel()
     return aws
 
@@ -155,14 +149,8 @@ def test_the_model_is_asked_at_temperature_zero_with_the_text_after_its_frame(
 def test_the_topic_model_and_its_prices_come_from_the_environment() -> None:
     settings = config.load_settings(MODEL_ENVIRONMENT)
     assert settings.topic_model_id == "openai.gpt-oss-20b-1:0"
-    assert (settings.topic_guardrail_id, settings.topic_guardrail_version) == (None, None)
     assert settings.prices.topic_model_input_tokens == Decimal("0.00009")
     assert settings.prices.topic_model_output_tokens == Decimal("0.0004")
-
-
-def test_a_topic_guardrail_beside_the_topic_model_is_refused() -> None:
-    with pytest.raises(errors.ConfigurationError, match="TOPIC_GUARDRAIL_ID"):
-        config.load_settings({**MODEL_ENVIRONMENT, "TOPIC_GUARDRAIL_ID": "gr-topics"})
 
 
 @pytest.mark.parametrize(
@@ -176,9 +164,9 @@ def test_the_topic_models_prices_are_required_and_checked(variable: str) -> None
         config.load_settings({**MODEL_ENVIRONMENT, variable: "cheap"})
 
 
-def test_without_the_topic_model_the_topic_guardrail_is_required() -> None:
+def test_the_topic_model_is_required() -> None:
     environment = {k: v for k, v in MODEL_ENVIRONMENT.items() if k != "TOPIC_MODEL_ID"}
-    with pytest.raises(errors.ConfigurationError, match="TOPIC_GUARDRAIL_ID"):
+    with pytest.raises(errors.ConfigurationError, match="TOPIC_MODEL_ID"):
         config.load_settings(environment)
 
 
@@ -193,12 +181,12 @@ def test_a_harmless_question_is_answered_with_the_topic_models_tokens_in_its_cos
     assert body["answer"] == "Use Settings > Export [1]."
     assert model_aws["guardrail"].question_calls == []
     assert model_aws["guardrail"].topic_calls == []
-    # Model 1624 + 50 tokens; the trace's units (topic 2, PII 1, grounding 3) and the
-    # excerpts' PII unit; two topic checks of 400 + 30 tokens each.
+    # Model 1624 + 50 tokens; the trace's priced units (PII 1, grounding 3; its topic units
+    # are not billed by a guardrail that reads no topic) and the excerpts' PII unit; two topic
+    # checks of 400 + 30 tokens each.
     expected = (
         1624 * Decimal("0.00015")
         + 50 * Decimal("0.00065")
-        + 2 * Decimal("0.15")
         + 2 * Decimal("0.10")
         + 3 * Decimal("0.10")
         + 800 * Decimal("0.00009")
@@ -289,7 +277,6 @@ def test_a_check_without_a_verdict_is_asked_once_more_and_counts_both_calls(
     without_topic_model = (
         1624 * Decimal("0.00015")
         + 50 * Decimal("0.00065")
-        + 2 * Decimal("0.15")
         + 2 * Decimal("0.10")
         + 3 * Decimal("0.10")
     )
@@ -375,9 +362,7 @@ def test_the_confirming_calls_run_at_once() -> None:
             return verdict_response(NONE)
 
     settings = SimpleNamespace(topic_model_id="openai.gpt-oss-120b-1:0", region="eu-central-1")
-    checked = topic_check.check_topics_with_model(
-        Runtime(), settings, "INPUT", "Wer ist der Inhaber?"
-    )
+    checked = topic_check.check_topics(Runtime(), settings, "INPUT", "Wer ist der Inhaber?")
     assert checked["topics"] == []
     assert checked["tokens"] == {"input_tokens": 1200, "output_tokens": 90}
 

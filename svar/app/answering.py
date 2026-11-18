@@ -22,12 +22,8 @@ def refused_for_topics(
     settings: config.Settings, checked: Mapping[str, Any], record: log.RequestRecord
 ) -> dict[str, Any]:
     """The response to a question the topic check refused: the handler's sentence, no
-    sources, no model call; it costs the check's topic units, or the topic model's tokens."""
-    units = (
-        None
-        if checked["units"] is None
-        else {**{name: 0 for name in pricing.PRICED_UNITS}, "topicPolicyUnits": checked["units"]}
-    )
+    sources, no model call; it costs the topic model's tokens."""
+    units = {name: 0 for name in pricing.PRICED_UNITS}
     usage = {"input_tokens": 0, "output_tokens": 0}
     record.topic_tokens = topic_check.topic_tokens(checked)
     record.guardrail = {
@@ -98,7 +94,6 @@ def answer_question(
     )
     record.model_answered = True
     guardrail = guardrails.read_guardrail(response)
-    guardrail["units"] = pricing.add_units(guardrail["units"], asked["units"], "topicPolicyUnits")
     replaced = llm.blocked_answer(response, guardrail, record.language)
     answer = replaced or llm.extract_answer(response, guardrail["action"], record.language)
     # Whatever of the model's text the reader gets is checked; only the handler's own sentence
@@ -107,9 +102,6 @@ def answer_question(
     if replaced is None:
         checked = topic_check.check_answer_topics(
             topic_check.topic_client(settings), settings, llm.model_text(response) or ""
-        )
-        guardrail["units"] = pricing.add_units(
-            guardrail["units"], checked["units"], "topicPolicyUnits"
         )
         if checked["topics"]:
             answer = sentences.in_language(sentences.ANSWER_WITHHELD_ANSWERS, record.language)

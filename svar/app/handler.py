@@ -97,13 +97,14 @@ def handle(event: Mapping[str, Any], record: log.RequestRecord) -> dict[str, Any
 def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
     """Lambda entry point: one HTTP request in, one HTTP response out.
 
-    Behind CloudFront only questions reach the function. Where it is the address itself
-    (`PAGE_VARIABLES`), it serves the page as well, and every response carries the headers
-    CloudFront would have set (page.py)."""
-    page_folder = os.environ.get(page.PAGE_FOLDER_VARIABLE, "").strip()
-    if not page_folder:
-        return answer_request(event)
+    The function's URL is the address: it serves the page from `PAGE_FOLDER_VARIABLE` and
+    answers questions at `page.ASK_PATH`, and every response carries `page.SECURITY_HEADERS`."""
     try:
+        page_folder = os.environ.get(page.PAGE_FOLDER_VARIABLE, "").strip()
+        if not page_folder:
+            raise errors.ConfigurationError(
+                f"The environment variable {page.PAGE_FOLDER_VARIABLE} is not set."
+            )
         served = page.route(event, page_folder)
     except Exception:
         log.log_event("crashed", status=500, traceback=traceback.format_exc())
