@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from taug.infra.answer_models import FRANKFURT_MODELS, REGIONS, AnswerModel
 from vard.scripts import tool_probe
 
 
@@ -138,7 +139,7 @@ def test_a_missing_permission_stops_the_run() -> None:
 
     with pytest.raises(tool_probe.AwsProblem, match="access denied"):
         tool_probe.run_model(
-            Runtime(), tool_probe.MODELS[0], tool_probe.load_cases(tool_probe.CASES_FILE)
+            Runtime(), FRANKFURT_MODELS[0], tool_probe.load_cases(tool_probe.CASES_FILE)
         )
 
 
@@ -191,7 +192,7 @@ def test_an_out_file_that_goes_bad_during_the_run_keeps_the_table_and_pays_no_mo
 ) -> None:
     """The first model was paid for and its result could not be saved: the table still
     appears, the second model is not asked, exit 2."""
-    first, second = tool_probe.MODELS[0], tool_probe.MODELS[1]
+    first, second = FRANKFURT_MODELS[0], FRANKFURT_MODELS[1]
     asked: list[str] = []
 
     class Refusing:
@@ -217,8 +218,36 @@ def test_an_out_file_that_goes_bad_during_the_run_keeps_the_table_and_pays_no_mo
 
 
 def test_a_region_outside_the_eu_is_refused(capsys: Any) -> None:
-    assert tool_probe.main(["--region", "us-east-1"]) == 2
+    assert tool_probe.main(["--region", "us-west-2"]) == 2
     assert "not an EU region" in capsys.readouterr().err
+
+
+def no_client(region: str) -> Any:
+    raise AssertionError(f"Bedrock was called in {region}")
+
+
+def test_a_region_without_a_table_is_refused_before_any_call(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(tool_probe, "model_client", no_client)
+    assert tool_probe.main(["--region", "eu-west-2"]) == 2
+    assert "eu-west-2 has no models" in capsys.readouterr().err
+
+
+def test_the_models_and_prices_are_those_of_the_regions_table(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A model of another region's table is unknown in Frankfurt, and measured in its own
+    region at its own price."""
+    elsewhere = AnswerModel("Only Elsewhere", "x.only-elsewhere-v1:0", "0.001", "0.002")
+    monkeypatch.setitem(REGIONS, "eu-test-1", REGIONS["eu-central-1"]._replace(models=(elsewhere,)))
+    monkeypatch.setattr(tool_probe, "model_client", no_client)
+    assert tool_probe.main(["--model", elsewhere.name]) == 2
+    assert "error: unknown model ['Only Elsewhere']" in capsys.readouterr().err
+    refusing = runtime_raising(converse_error("ValidationException"))
+    monkeypatch.setattr(tool_probe, "model_client", lambda region: refusing)
+    assert tool_probe.main(["--region", "eu-test-1"]) == 0
+    assert "| Only Elsewhere | 0/6 |" in capsys.readouterr().out
 
 
 def test_an_expected_spelling_in_capitals_matches_too() -> None:
@@ -254,9 +283,9 @@ def test_a_request_the_model_does_not_accept_is_a_result(
     where a model that takes no tools is told from a wrong model id."""
     refusing = runtime_raising(converse_error("ValidationException"))
     monkeypatch.setattr(tool_probe, "model_client", lambda region: refusing)
-    assert tool_probe.main(["--model", tool_probe.MODELS[0].name]) == 0
+    assert tool_probe.main(["--model", FRANKFURT_MODELS[0].name]) == 0
     captured = capsys.readouterr()
-    assert f"| {tool_probe.MODELS[0].name} | 0/6 |" in captured.out
+    assert f"| {FRANKFURT_MODELS[0].name} | 0/6 |" in captured.out
     assert "t1: error: An error occurred (ValidationException)" in captured.out
     assert "failed calls" not in captured.err
 
@@ -282,9 +311,9 @@ def test_a_call_that_fails_for_any_other_reason_fails_the_run(
     the file are written all the same."""
     monkeypatch.setattr(tool_probe, "model_client", lambda region: runtime_raising(error))
     out = tmp_path / "tools.json"
-    assert tool_probe.main(["--model", tool_probe.MODELS[0].name, "--out", str(out)]) == 2
+    assert tool_probe.main(["--model", FRANKFURT_MODELS[0].name, "--out", str(out)]) == 2
     captured = capsys.readouterr()
-    assert f"| {tool_probe.MODELS[0].name} | 0/6 |" in captured.out
+    assert f"| {FRANKFURT_MODELS[0].name} | 0/6 |" in captured.out
     assert "error: failed calls, counted as failed" in captured.err
     (summary,) = json.loads(out.read_text(encoding="utf-8"))["summaries"]
     assert summary["failed_calls"] == ["t1", "t2", "t3", "t4", "t5", "t6"]

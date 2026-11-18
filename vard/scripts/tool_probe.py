@@ -1,12 +1,12 @@
 """Whether an answer model fills in a tool cleanly, and asks instead of guessing.
 
-It measures whether each model of `FRANKFURT_MODELS` fills in one tool cleanly and asks
-back instead of guessing. Each case in `tool-cases.json` sends one conversation through
-Bedrock `converse` with one tool, `record_order` (material, quantity, unit, site, delivery date, all
-required). A case that gives everything expects exactly one call with the
-expected values; a case that leaves something out or vague expects no call and
-a question or a request back for what is missing. No guardrail, no knowledge
-base: only the model, in ``--region``. A run of the six cases costs fractions of a cent.
+It measures whether each model of the table of ``--region`` (taug/infra/answer_models.py) fills
+in one tool cleanly and asks back instead of guessing. Each case in `tool-cases.json` sends one
+conversation through Bedrock `converse` with one tool, `record_order` (material, quantity, unit,
+site, delivery date, all required). A case that gives everything expects exactly one call with
+the expected values; a case that leaves something out or vague expects no call and a question
+or a request back for what is missing. No guardrail, no knowledge base: only the model, in
+``--region``. A run of the six cases costs fractions of a cent.
 """
 
 import argparse
@@ -20,15 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from svar.scripts.evaluate import stays_in_the_eu
-from taug.infra.answer_models import FRANKFURT_MODELS, AnswerModel
+from taug.infra.answer_models import DEFAULT_REGION, AnswerModel, region_models
 from taug.scripts import utf8_output
 from taug.scripts.aws import AwsProblem, error_code, explain, explained, is_login_problem
 
 CASES_FILE = Path(__file__).with_name("tool-cases.json")
-
-DEFAULT_REGION = "eu-central-1"
-
-MODELS = FRANKFURT_MODELS
 
 #: The day the cases are set on: "morgen" and "Freitag" mean dates relative to it.
 TODAY = "Tuesday, 6 October 2026"
@@ -273,25 +269,31 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m vard.scripts.tool_probe",
         description="Check that answer models call a tool cleanly and ask instead of guessing.",
     )
-    parser.add_argument("--model", action="append", help="a model name from MODELS")
+    parser.add_argument("--model", action="append", help="a model name from the region's table")
     parser.add_argument("--cases", type=Path, default=CASES_FILE)
     parser.add_argument("--out", type=Path)
-    parser.add_argument("--region", default=DEFAULT_REGION)
+    parser.add_argument("--region", default=DEFAULT_REGION, help=f"default: {DEFAULT_REGION}")
     args = parser.parse_args(argv)
-    models = [m for m in MODELS if not args.model or m.name in args.model]
-    unknown = set(args.model or []) - {m.name for m in MODELS}
+    if not args.region.startswith("eu-"):
+        print(f"error: {args.region} is not an EU region", file=sys.stderr)
+        return 2
+    try:
+        # The region's own table, so that the costs count with its prices.
+        known = region_models(args.region).models
+    except KeyError as problem:
+        print(f"error: {problem.args[0]}", file=sys.stderr)
+        return 2
+    models = [m for m in known if not args.model or m.name in args.model]
+    unknown = set(args.model or []) - {m.name for m in known}
     if unknown or not models:
         print(
-            f"error: unknown model {sorted(unknown)}; known: {[m.name for m in MODELS]}",
+            f"error: unknown model {sorted(unknown)}; known: {[m.name for m in known]}",
             file=sys.stderr,
         )
         return 2
     outside = [m.model_id for m in models if not stays_in_the_eu(m.model_id)]
     if outside:
         print(f"error: these would leave the EU: {outside}", file=sys.stderr)
-        return 2
-    if not args.region.startswith("eu-"):
-        print(f"error: {args.region} is not an EU region", file=sys.stderr)
         return 2
     try:
         cases = load_cases(args.cases)
