@@ -26,7 +26,7 @@ ANSWER_FRAME = "Answer from the business to a customer: "
 
 #: The cause a topic check by the model gives when its reply names no topic and not "none":
 #: empty, without the JSON, or a topic of its own. Such a first call is replaced by one more,
-#: and the check refuses when that one gives no verdict either (`check_topics_with_model`).
+#: and the check refuses when that one gives no verdict either (`check_topics`).
 UNREADABLE_VERDICT = (
     "the topic model gave no readable verdict",
     "das Themen-Modell hat kein lesbares Urteil geliefert",
