@@ -297,3 +297,18 @@ def test_the_client_waits_as_long_as_it_is_told(given: dict[str, int], expected:
     config = client.meta.config
     assert (config.read_timeout, config.connect_timeout) == (expected, tool_probe.CONNECT_SECONDS)
     assert config.retries == {"total_max_attempts": 1, "mode": "standard"}
+
+
+def test_an_unknown_model_is_refused_on_stderr_before_any_aws_call(
+    monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """The error goes to stderr, so a table piped into a file leaves it on the terminal."""
+
+    def paid(*_: Any, **__: Any) -> Any:
+        raise AssertionError("the run reached AWS")
+
+    monkeypatch.setattr(tool_probe, "model_client", paid)
+    assert tool_probe.main(["--model", "no-such-model"]) == 2
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: unknown model [")
+    assert captured.out == ""

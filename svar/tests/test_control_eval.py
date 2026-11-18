@@ -802,3 +802,20 @@ def test_a_workspace_asks_only_its_own_questions(monkeypatch: pytest.MonkeyPatch
     every = control_eval.load_control_questions(control_eval.QUESTIONS_FILE)
     assert len(asked) == sum(q["workspace"] == "kalvenstett" for q in every) < len(every)
     assert {q["workspace"] for q in asked} == {"kalvenstett"}
+
+
+def test_an_unknown_model_is_refused_on_stderr_before_any_aws_call(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The error goes to stderr, so a table piped into a file leaves it on the terminal."""
+
+    def paid(*_: Any) -> Any:
+        raise AssertionError("the run reached AWS")
+
+    monkeypatch.setattr(control_eval, "deployed_environment", paid)
+    monkeypatch.setattr(control_eval, "client", paid)
+    argv = ["--region", "eu-central-1", "--model", "no-such-model"]
+    assert control_eval.main(argv) == 2
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: unknown model [")
+    assert captured.out == ""

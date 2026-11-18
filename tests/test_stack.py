@@ -103,6 +103,11 @@ def deploy_context() -> dict[str, Any]:
     return json.loads(CDK_JSON.read_text(encoding="utf-8"))["context"]
 
 
+def test_the_cdk_cli_telemetry_stays_off_for_every_run_from_the_repository() -> None:
+    """The key keeps the CDK CLI's telemetry off in every run (``2026-11-17-cdk-telemetry-off``)."""
+    assert deploy_context()["cli-telemetry"] is False
+
+
 #: The region a test stack is built for when it names none: Ireland, the one region whose stack
 #: has CloudFront, the topic guardrail and the EU profile, which this module checks. Frankfurt's
 #: stack is checked in svar/tests/test_regions.py.
