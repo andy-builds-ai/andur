@@ -200,6 +200,36 @@ in the text. `--no-version-reporting` would turn it off as well, but also the
 (`deploy_context` in `tests/test_stack.py`); both templates of each region
 stayed byte for byte the same.
 
+<a name="2026-11-18-frankfurt-alone"></a>
+**2026-11-18 — Ireland and us-east-1 are gone; the code builds Frankfurt
+alone.** The operator decided: Svar is to run cleanly in Frankfurt, as if it
+had been built there first. On 18.11.2026 the stacks in `eu-west-1` and
+`us-east-1` and everything they left behind (buckets, keys, log groups) were
+deleted; Frankfurt was not touched. The code followed the same day.
+`REGIONS` holds `eu-central-1` alone, and with Ireland's row went what only
+it used: CloudFront and the site bucket (`svar/infra/web.py` is built no
+more), the topic guardrail in the Standard tier and the EU guardrail profile,
+Ireland's price table of 28.09.2026, and the second `cdk synth` in CI. So
+did the Frankfurt fallback through the profile (*`SvarStack` takes its
+settings from its region's table*, 2026-11-17), because the profile carries
+the checks to six EU regions and a company's documents stay in Germany, and
+`control_eval`'s Classic and Standard tiers, since the Classic tier reads no
+German. The topic model in the region is the one way the topics are checked.
+The answer function lost the topic guardrail's settings and units and the
+way behind CloudFront: it always serves the page, and the page and
+`svar/scripts/ask.py` stop sending `x-amz-content-sha256`, which only
+CloudFront's signature needed. The key retirer went from `TaugStack`: it
+stayed for the old stack in us-east-1 (`taug/infra/api_keys/handler.py`),
+and no stack holds a key resource any more. The grounding probe and the
+topic probe measure Frankfurt; `tool_probe` reads the models of its
+region's table. The READMEs describe Frankfurt alone; what was measured in
+Ireland and us-east-1 stays in the entries above and in git. The entries
+above that speak of Ireland, us-east-1, CloudFront or the topic guardrail
+stay as they were written. Built in two steps: the first left both
+templates byte for byte the same; the second changes `AndurStack` in the
+function's code, the page layer and one variable, and `TaugStack` by the
+retirer's seven resources, and waits for a deploy ([status.md](status.md)).
+
 <a name="2026-09-28-account-wide-names-carry-region"></a>
 **2026-09-28 — Names that hold for the whole account carry the region.**
 IAM role names and CloudFront policy and origin access control names are
