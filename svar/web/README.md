@@ -3,29 +3,22 @@
 Five files and no build step: `index.html`, `app.js`, `language.js`,
 `markdown.js`, `style.css`. No framework, no bundler, no npm package, nothing loaded from
 another server — not a font, not a script, not a pixel. What is in this
-folder is what the browser gets. `cdk deploy` copies it into the site bucket and clears the
-CloudFront caches, so a change to a file here is live with the next deploy.
+folder is what the browser gets. `cdk deploy` packs it into a layer of the answer
+function, so a change to a file here is live with the next deploy.
 This README stays behind: the deploy leaves it out, like every other
 `README.md` in a packaged folder.
 
 ## One address for everything
 
-In eu-central-1 the answer function serves these files itself, at its own URL,
-with the security headers below set by the function (`svar/app/page.py`); there is
-no CloudFront and no site bucket there, and the deploy puts the files into a
-layer of the function. The rest of this section describes eu-west-1, whose
-stack is not carried on ([docs/status.md](../../docs/status.md)).
+The answer function serves these files itself, at its own URL, from a layer
+of the function (`svar/app/page.py`); there is no CloudFront and no site
+bucket.
 
-The page and the answer function sit behind the same CloudFront distribution.
-The page is served from a private S3 bucket; the single path `/ask` goes to
-the answer function's URL instead. Both are reached through an origin access
-control, so neither is reachable from outside on its own.
-
-Every response the distribution sends carries the security headers set on it:
+Every response the function sends carries the security headers it sets:
 a content security policy that allows nothing but this page's own script,
 stylesheet and `/ask` call, `frame-ancestors 'none'` so the page cannot be
 put in somebody else's frame, HSTS, `X-Content-Type-Options: nosniff` and
-`Referrer-Policy: no-referrer`. They are set once on the distribution, so no
+`Referrer-Policy: no-referrer`. They are set once in the function, so no
 file here has to carry a `<meta>` of its own.
 
 Because it is one address, the page posts to `/ask` — a relative path. It
@@ -33,16 +26,7 @@ never has to know its own address, which is why no file here carries one and
 why there is no configuration file to keep in step. It also means there is no
 cross-origin request and so nothing to allow with CORS.
 
-Two consequences for the request, both from the way in rather than from the
-function:
-
-- **The key travels in `X-Andur-Key`, not in `Authorization`.** CloudFront
-  signs every request it forwards to a function URL and puts its own
-  signature into `Authorization`, so a key sent there would never arrive.
-- **The request carries the SHA-256 of its body in `x-amz-content-sha256`.**
-  A signed request to a Lambda function URL may not have an unsigned payload.
-  `crypto.subtle.digest` computes it; it is built into the browser and needs
-  an https connection, which the page always has.
+The key travels in a header of its own, `X-Andur-Key`.
 
 ## Two languages
 
@@ -93,11 +77,10 @@ questions off the key's budget, and an answer that may not belong to the
 question in the field.
 
 The page stops waiting after 200 seconds, longer than the function may run
-(195). Behind CloudFront, CloudFront gives up at 120 and sends a 504, so that
-answer arrives first. Without CloudFront (eu-central-1) the function's own
-timeout ends a request, and it times a second model call so that its answer
-is back before it (`caller_deadline_seconds` in `svar/app/aws.py`). Either way the
-page's limit is the floor, for a connection that neither answers nor fails. Without it
+(195). The function's own timeout ends a request, and it times a second model
+call so that its answer is back before it (`caller_deadline_seconds` in
+`svar/app/aws.py`). The page's limit is the floor, for a connection that
+neither answers nor fails. Without it
 the button stayed on *Asking…* until the browser was reloaded.
 
 An answer is shown as the model wrote it, with its `[n]` citations, then the
@@ -128,25 +111,22 @@ containing `<script>` shows those eight characters.
 | Any status with a JSON `error` | That sentence, unchanged. It comes from the function, in the language the question was asked in, and says it better than the page could. |
 | 402 | The sentence, plus a line (in the page's language) that a new key is what helps. |
 | 429 with a sentence | A key on a plan has reached its quota for the month or the day. The sentence alone: the quota comes back, and a new key is not what helps. |
-| 429 without a sentence | Svar is busy — 5 requests run at a time in eu-west-1; in eu-central-1, where page loads count too, the stack reserves 10; the rest are turned away. |
+| 429 without a sentence | Svar is busy — the stack reserves 10 executions, page loads included; the rest are turned away. |
 | 403 without a sentence | The request was refused on the way in. Not a wrong key — that is a 401 with a sentence. |
-| 504 | The answer took longer than CloudFront waits (120 seconds). The function may still be running it, and the question is already counted. |
+| 504 | The service stopped waiting for the answer. The question may still be running, and it is already counted. |
 | No response at all | The connection failed. |
 | Nothing within 200 seconds | The page stopped waiting. The question may still be running, and asking again costs another one. |
 
 The sentences in this table are the English ones; `language.js` has them in
 German too. The three statuses without a sentence never passed through the
-function, so there is no sentence to pass on. Their bodies are not the function's either:
-a 403 comes back as Lambda's `{"message": "The request signature we
-calculated does not match ..."}` when a request reaches the function URL
-unsigned or wrongly signed (measured 17.09.2026), and CloudFront's own error
-pages are HTML. Neither carries an `error` field, which is how the page tells
+function, so there is no sentence to pass on. Their bodies are not the
+function's either and carry no `error` field, which is how the page tells
 them apart from a refusal it should quote. Status codes and their meanings
 are in [svar/app/README.md](../app/README.md).
 
 ## Editing it
 
 Open `index.html` from disk and the layout is there, but asking will not
-work: `crypto.subtle` needs a secure connection, and `/ask` needs the
-distribution in front of it. The page says so instead of failing silently.
+work: the page sends the key only over https, and `/ask` needs the
+function behind it. The page says so instead of failing silently.
 To try a change end to end, deploy it.

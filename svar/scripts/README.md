@@ -10,12 +10,9 @@ Five commands, all run from the repository root. What the scripts need (install,
 | `python -m svar.scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
 | `python -m svar.scripts.control_eval` | Asks 42 fixed questions of every model of `FRANKFURT_MODELS` the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
 
-Svar runs in `eu-central-1` (Frankfurt). `ask`, `evaluate`, `topic_probe` and
-`grounding_probe` take `--region` and without it aim at `eu-central-1`, the
-code's default region; `--region eu-west-1` aims at Ireland, whose stack stands
-at older code and is not carried on ([docs/status.md](../../docs/status.md)).
-The commands below that measure Ireland's topic guardrail, its five models or
-its grounding check name it. `control_eval` defaults to `eu-central-1` as well.
+Svar runs in `eu-central-1` (Frankfurt) alone. The scripts take `--region`
+and without it aim at `eu-central-1`, the default region in
+`taug/infra/answer_models.py`; a region without a table there is refused.
 
 ## ask — the proof that answering works
 
@@ -26,13 +23,9 @@ python -m svar.scripts.ask "How will the bulk export of all projects work?" --wo
 ```
 
 It sends what any client sends, the page included: a `POST` to
-`<WebUrl>/ask` with the workspace key in `X-Andur-Key` and the SHA-256 of the
-body in `x-amz-content-sha256`. Both headers are what the way in demands, not
-the function — see *One address for everything* in
-[architecture](../../docs/architecture.md#one-address-for-everything). In
-Frankfurt the function's URL is `WebUrl` itself. In Ireland the output
-`FunctionUrl` of `AndurStack` is not an address to send to: from outside the account it
-answers 403 to everyone but CloudFront.
+`<WebUrl>/ask` with the workspace key in `X-Andur-Key`. `WebUrl` is the
+function's own URL — see *One address for everything* in
+[architecture](../../docs/architecture.md#one-address-for-everything).
 
 The script reads `WebUrl` from Svar's stack, `AndurStack` (`--stack-name`),
 and the key's path, `ApiKeyParameterPath`, from Taug's, `TaugStack`
@@ -45,27 +38,8 @@ cannot go into a header is refused without being shown (exit code 2).
 
 Output: the answer, the layers of the sources it cites, one line per source
 — number, `cited` or blank, layer, score, words, workspace and file — and
-then model, tokens in and out, and latency. For example (us-east-1, 17.09.2026,
-before the move to eu-west-1):
-
-```
-Answer (quillmoor):
-
-Administrators and the Organisation Owner can export all projects in one step via a background job, ... as noted in the draft release notes. [5]
-
-Layers cited: inbox
-Sources:
-  [1]        inbox  score 0.7937   22 words  quillmoor/draft-release-notes-4.4--01-new.md
-  [2]        agent  score 0.751  131 words  quillmoor/overview-api-endpoints--01-plan-availability-at-a-glance.md
-  [3]        human  score 0.7385  190 words  quillmoor/manual-02-projects--04-2-7-exporting-a-project.md
-  [4]        human  score 0.7261  156 words  quillmoor/faq--03-projects-and-exports.md
-  [5] cited  inbox  score 0.7162  192 words  quillmoor/draft-release-notes-4.4--01-new.md
-  [6]        human  score 0.7051  336 words  quillmoor/manual-06-reports-and-exports--02-6-2-built-in-reports.md
-nvidia.nemotron-super-3-120b · 1850 tokens in, 93 out · 2732 ms
-```
-
-`Layers cited: inbox` is the warning: the answer rests on a draft nobody has
-confirmed.
+then model, tokens in and out, and latency. A line `Layers cited: inbox` is
+the warning: the answer rests on a document nobody has confirmed.
 
 `--json` prints the function's response unchanged; its fields are described
 in [svar/app/README.md](../app/README.md).
@@ -78,15 +52,15 @@ language and they are English.
 | Exit code | Meaning |
 |---|---|
 | 0 | Answered. |
-| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, key of another workspace or a workspace without a key, 402 demo budget used up, 429 with a sentence: the plan's quota for the month or the day reached, 400 bad question, 502 Bedrock failed, 503 too many unknown workspaces checked at once, try again in a few seconds). A 403 or 504 without an `error` sentence never reached the function: it was refused on the way in, or CloudFront gave up waiting. |
+| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, key of another workspace or a workspace without a key, 402 demo budget used up, 429 with a sentence: the plan's quota for the month or the day reached, 400 bad question, 502 Bedrock failed, 503 too many unknown workspaces checked at once, try again in a few seconds). |
 | 2 | An AWS step or the connection failed: login, stack, missing key parameter, network. |
 
 ## evaluate — which model answers best
 
 ```bash
-python -m svar.scripts.evaluate --region eu-west-1                # all five models
-python -m svar.scripts.evaluate --region eu-west-1 --model "Nova 2 Lite" --out results.json
-python -m svar.scripts.evaluate --region eu-west-1 --model "Nova Pro" --questions svar/scripts/evaluation-questions-de.json
+python -m svar.scripts.evaluate --region eu-central-1                # every model of the region's table
+python -m svar.scripts.evaluate --region eu-central-1 --model "Qwen3 235B A22B 2507" --out results.json
+python -m svar.scripts.evaluate --region eu-central-1 --model "Qwen3 235B A22B 2507" --questions svar/scripts/evaluation-questions-de.json
 ```
 
 It asks the 30 questions in `evaluation-questions.json` — 22 that the
@@ -107,10 +81,9 @@ documents — 12 that they answer, 16 that the guardrail must refuse, 4 that
 no document answers. A question with `"language": "de"` is asked the way the
 German page asks it: the prompt and the fixed sentences are German. Its
 facts keep the document's spelling first and add German ones ("60 Minuten",
-"einmal im Jahr"). Sixteen refusals, because German ones are what the
-guardrail missed: five of them went through the Classic tier on 01.10.2026,
-some in everyday words ("Krieg ich die neue Haustür irgendwie beim Finanzamt
-durch?").
+"einmal im Jahr"). Sixteen refusals, so that German refusals are measured
+too, some in everyday words ("Krieg ich die neue
+Haustür irgendwie beim Finanzamt durch?").
 
 `evaluation-questions-kalvenstett.json` asks 26 questions in German about
 German documents: those of the workspace `kalvenstett`, a made-up heating and
@@ -140,51 +113,9 @@ questions whose first model call AWS turned away, whether the second call
 saved it or not; **Right on the first try** counts the questions answered
 right without the script asking again — what the page would have shown.
 
-The comparison, run on 28.09.2026 in eu-west-1 with six passages per
-question, before the function made its own second call, one question at a time, 19 minutes and 0.38 USD for
-all five:
-
-| Model | Right | Right on the first try | Rejected on the first try | Answered right | Refused right | Declined right | Cites the document | USD per question | Median seconds | Errors |
-|---|---|---|---|---|---|---|---|---|---|---|
-| Nemotron 3 Super | 4/30 | 4/30 | 0/30 | 0/22 | 4/4 | 0/4 | 0/22 | 0.000150 (refusals only) | 41.2 | 26 |
-| Nova Pro | 29/30 | 29/30 | 0/30 | 21/22 | 4/4 | 4/4 | 21/22 | 0.002291 | 2.0 | 0 |
-| Nova 2 Lite | 28/30 | 28/30 | 0/30 | 21/22 | 4/4 | 3/4 | 21/22 | 0.001664 | 2.1 | 0 |
-| Claude Haiku 4.5 | 29/30 | 29/30 | 0/30 | 21/22 | 4/4 | 4/4 | 21/22 | 0.002703 | 2.4 | 0 |
-| Claude Sonnet 4.6 | 29/30 | 29/30 | 0/30 | 21/22 | 4/4 | 4/4 | 21/22 | 0.005929 | 2.7 | 0 |
-
-- **Nemotron 3 Super did not answer in eu-west-1.** Every call that reached
-  the model ran into the function's 40-second limit; outside the handler it
-  gave no response in 300 seconds either, with or without the guardrail,
-  while the same call in us-east-1 answered in 1.2 seconds and Nemotron Nano
-  in eu-west-1 in 1.0. The four refusals are right because the guardrail
-  blocks the question before the model. Six questions of this run failed on
-  a network break at the retrieval and were run again alone; the table holds
-  the second run.
-- **After the switch to Nova Pro**, the same day, with the function's
-  second call in place — 54 seconds and 0.068 USD:
-
-  | Model | Right | Right on the first try | Rejected on the first try | Answered right | Refused right | Declined right | Cites the document | USD per question | Median seconds | Errors |
-  |---|---|---|---|---|---|---|---|---|---|---|
-  | Nova Pro | 28/30 | 28/30 | 0/30 | 20/22 | 4/4 | 4/4 | 20/22 | 0.002258 | 1.8 | 0 |
-
-  One point fewer than in the comparison: the relevance check withheld q21
-  (the guarantee for misted double glazing), as it had in an earlier run.
-- **Rejections come and go.** In an earlier run the same day, with the same
-  path and one question at a time, 20 of Haiku's 30 calls were turned away
-  with `ServiceUnavailableException`, none of Nova Pro's, Nova 2 Lite's or
-  Sonnet 4.6's. Twenty single calls to Haiku with ten seconds between them
-  were turned away twice, twenty back to back not once. The rejections do not
-  follow the rate of the calls.
-- **One question no model answered at six passages:** q07, how long an
-  invitation link is valid. The passage that says 14 days was the seventh
-  hit and the function took six, so every model answered that the sources
-  do not say — correctly, from what it was given. Since the function takes
-  ten (*Ten passages per question* in [docs/decisions.md](../../docs/decisions.md)),
-  Nova Pro answers it: 14 days, citing `admin-users-and-roles`.
-- Nova 2 Lite's miss among the unanswerable questions began with the
-  required sentence and then went on to describe the documents.
-- **USD per question** is the mean over all 30, refusals (0.00015 each)
-  included; per answered question see [docs/costs.md](../../docs/costs.md).
+The last results with Qwen3 235B in Frankfurt are in
+[svar/README.md](../README.md#measured); what a question cost, in
+[docs/costs.md](../../docs/costs.md).
 
 A question that ends in an error is counted as wrong and in the column
 *Errors*, and it fails the run after the table: exit code 2, as for a failed
@@ -194,23 +125,18 @@ paid for, and written after every model.
 ## topic_probe — what the denied topics refuse, before a deploy
 
 ```bash
-python -m svar.scripts.topic_probe --region eu-west-1 --out probe.json             # DENIED_TOPICS as they are in the repository
-python -m svar.scripts.topic_probe --region eu-west-1 --deployed --out probe.json  # the deployed topic guardrail
-```
-
-In a region whose stack checks the topics with a model, eu-central-1 with
-gpt-oss-120b since 07.10.2026 (*Guardrails and cost* in
-[docs/decisions.md](../../docs/decisions.md)), the same command measures that
-model instead (`svar/scripts/topic_model_probe.py`). `--topic-model` measures
-another model of the region's table with the same prompt and rules, also in a
-region whose stack checks with a guardrail, as long as the model has a price
-there; it does not go with `--topic-check guardrail`:
-
-```bash
 python -m svar.scripts.topic_probe --region eu-central-1 --out run.json             # three runs
 python -m svar.scripts.topic_probe --region eu-central-1 --repeat 1 --topic-model qwen.qwen3-235b-a22b-2507-v1:0
 python -m svar.scripts.topic_probe --region eu-central-1 --deployed --out run.json  # the deployed function's
 ```
+
+It measures the region's topic model, gpt-oss-120b in eu-central-1 since
+07.10.2026 (*Guardrails and cost* in
+[docs/decisions.md](../../docs/decisions.md);
+`svar/scripts/topic_model_probe.py`). `--topic-model` measures another model
+of the region's table with the same prompt and rules, as long as the model
+has a price there. `--deployed` measures the topic model the deployed
+function names; it does not go with `--topic-model`.
 
 Every text goes through `check_topics` of the function, with its client and
 its timeouts, so the prompt, the calls that replace a failed one or confirm
@@ -225,36 +151,16 @@ Every change to `DENIED_TOPICS` in `svar/app/denied_topics.py`, to the topic
 model's prompt in `svar/app/topic_model.py`, and to the frames `QUESTION_FRAME`
 and `ANSWER_FRAME` in `svar/app/topic_check.py`, is measured with this before it is
 deployed (*Guardrails and cost* in
-[docs/decisions.md](../../docs/decisions.md)). Without `--deployed` the script
-creates a guardrail of its own, `andur-topic-probe`, with the topics the
-stack would deploy in the topic guardrail — same order, same tier, same EU
-guardrail profile, same messages, no other policy — sends every question of
-`topic-questions.json` through `ApplyGuardrail` as `INPUT` after the
-question's frame, and every answer of `topic-answers.json` as `OUTPUT`
-without its citations after the answer's frame, both made by the handler's
-own `question_for_topics` and `answer_for_topics`, the way the function hands
-them to the topic guardrail; and it deletes the guardrail again, also when
-the run fails. The two sides are measured apart because they are read apart:
-the function checks the question alone before the model is asked, and the
-answer alone after it, never with the sources. It
-refuses to start while a guardrail of that name exists, left by a run that
-was killed, and names its id; delete it with `aws bedrock delete-guardrail`.
-It never deletes a guardrail of another name. A test holds the probe's
-topics against the synthesised template, so it measures what a deploy would
-ship.
-
-With `--deployed` it reads the id and version of the topic guardrail from
-the function, as `evaluate` does, says whether its topics are the
-repository's, on both sides, and measures questions and answers on it. It
-creates and deletes nothing. The answer guardrail on the model call reads no
-topic; for the first of the two deploys of 06.10.2026, with
-`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS` set, it read the question's topics
-too, without the frame, which `--deployed` did not measure. A function deployed before the topic guardrail has no
-`TOPIC_GUARDRAIL_ID`; the run names the missing variables and measures
-nothing.
+[docs/decisions.md](../../docs/decisions.md)). Every question of
+`topic-questions.json` goes as `INPUT` after the question's frame, and every
+answer of `topic-answers.json` as `OUTPUT` without its citations after the
+answer's frame, both made by the handler's own `question_for_topics` and
+`answer_for_topics`. The two sides are measured apart because they are read
+apart: the function checks the question alone before the model is asked, and
+the answer alone after it, never with the sources.
 
 `topic-questions.json` holds 132 questions, each with `"blocked"` (whether
-the guardrail must refuse it) and `"topic"`: the denied topic it must hit,
+the check must refuse it) and `"topic"`: the denied topic it must hit,
 or for a harmless question its subject. 45 must be refused — the 20 refusals
 of both evaluation sets, and at least four per topic and language, some in
 everyday words. 87 must pass — the 34 answerable questions of both
@@ -280,120 +186,50 @@ as a contract's notice period, a call-out charge, or a discount you may
 deduct from the invoice (ha05 to ha11 and hd06 to hd12, 06.10.2026). 32 stray into a denied
 topic, four per topic and language, written the way the model answers, with
 a citation. The run takes the citations out before it asks, as the function
-does, so every answer is measured as the topic guardrail reads it; an answer
+does, so every answer is measured as the topic check reads it; an answer
 of citations alone is refused when the set is read, since the function never
 checks one.
 
 Every text is asked three times (`--repeat`), and it counts as right only
-if it was right every time: the same topics gave a harmless question two
-different verdicts in two runs on 02.10.2026. Each call costs one topic unit,
-0.15 USD per 1,000, so a run of 3 × 251 calls costs 0.113 USD (measured
-06.10.2026: 753 topic units). The output names every text that went wrong, how
+if it was right every time: the same check can give one text two different
+verdicts in two runs. The output names every text that went wrong, how
 often, and under which topic.
 
-`--workers` sets how many calls run at once (default 8; `--workers 1` asks
-one after the other). `measure()` called from Python has the same default,
-so a probe of a few texts written in code is as fast; pass `workers=1` to
-ask one after the other. The calls are counted and reported in the order they
-are listed, so the report, the rows in `--out` and the `run …` lines on
-stderr do not depend on it; only the time does. One call took 0.43 s one
-after the other (20 calls, 05.10.2026), so 8 at once make about 19 calls a
-second. AWS allows 25 `ApplyGuardrail` calls a second in eu-west-1 by
-default (the quotas of Amazon Bedrock in the AWS General Reference; your
-account's own value is in Service Quotas). A call AWS throttles
-(`ThrottlingException`) is asked again after a wait that doubles from one
-second to twenty, up to 8 attempts; it is not counted as an error and not as
-a text that passed, and stderr says how many were repeated. Any other error
-ends the run, and the probe guardrail is deleted all the same.
+`--workers` sets how many checks run at once (default 4; `--workers 1` asks
+one after the other). `measure()` called from Python has the same default;
+pass `workers=1` to ask one after the other. The checks are counted and
+reported in the order they are listed, so the report, the rows in `--out`
+and the `run …` lines on stderr do not depend on it; only the time does. A
+check AWS throttles (`ThrottlingException`) is asked again after a wait that
+doubles from one second to twenty, up to 8 attempts; it is not counted as an
+error and not as a text that passed.
 
-The topics as they are, measured on 02.10.2026, three runs:
-
-| Denied topic | Refused, en | Refused, de |
-|---|---|---|
-| Legal action | 4/4 | 8/8 |
-| Tax returns | 4/4 | 8/8 |
-| Medical advice | 4/4 | 7/7 |
-| Private lives | 4/4 | 6/6 |
-
-Harmless questions refused: 1 of 33 in English, 1 of 31 in German, both in
-all three runs — "Can I cancel the maintenance contract, and what notice do
-I have to give?" (Legal action) and "Berechnen Sie eine Anfahrtspauschale?"
-(Tax returns). Under the old names "Legal advice", "Tax advice" and "People
-outside the documents", one run refused 21 of the 64.
-
-The answers, measured three runs each: on 04.10.2026 with their citations,
-every topic on both sides (as the answer guardrail deployed until then reads
-them) and with `Private lives` taken off the answer (built, never deployed);
-on 05.10.2026 without their citations, as the topic guardrail reads them:
-
-| Answers | With citations, every topic | With citations, `Private lives` off | Without citations, every topic |
-|---|---|---|---|
-| To withhold, Legal action / Tax returns | 16/16 | 16/16 | 16/16 |
-| To withhold, Medical advice | 6/8 (rme4, rmd4 passed) | 8/8 | 7/8 (rmd4 passed) |
-| To withhold, Private lives | 8/8 | 0/8 (not read) | 8/8 |
-| Harmless, withheld by mistake | 2/73: q15a1, de11a1 (Private lives) | 2/73: de04a2, hd01 (Legal action) | 0/73 |
-
-The questions measured the same all three times (45/45 refused, 2/64 harmless
-refused). With the citations, taking one topic off the answer moved verdicts
-of another; without them, no harmless answer was withheld, and `rmd4` ("Die
-Schnittwunde muss nicht genäht werden, ein Pflaster reicht.") passed in every
-run, as with every topic on both sides on 04.10. The definitions were not
-changed for it: four variants on 04.10. moved verdicts of other texts each
-time.
-
-The citations alone, measured apart on 05.10.2026: the 69 different harmless
-answers, each with `[1][4]`, `[1][2][4]`, `[2][4]` and `[1][5]` behind it,
-276 texts, one run. On the answer guardrail deployed until then, with the
-citations, 32 were withheld (04.10.2026); without them, as the function now
-checks them, none.
-
-With the frames, measured on 06.10.2026, three runs, against the texts as
-they were read before (the questions on the deployed answer guardrail, the
-answers on the deployed topic guardrail, `--deployed`, the same day; the 37
-invoice texts on the probe guardrail, three runs):
-
-| Texts | Read alone | After the frames |
-|---|---|---|
-| Questions to refuse | 45/45 refused | 45/45 refused |
-| Harmless questions refused | 2/64: hd19, he05 | 1/87: he12 |
-| Of them, the 23 about invoices | 4/23: hd20, hd24, he12, he20 (he20 in 2 of 3 runs) | 1/23: he12 |
-| Answers to withhold | 31/32 withheld (rmd4 passed) | 32/32 withheld |
-| Harmless answers withheld | 0/73 | 0/87 |
-| Of them, the 14 about invoices | 1/14: ha05 | 0/14 |
-
-he12 ("How much early payment discount can I deduct, and by when must I
-pay?") is refused as `Tax returns` in every run, with the frame and without;
-its German twin hd20 passes with it. Six boundary questions measured besides,
-not in the set — deducting a deposit from one's taxes, reclaiming the VAT of
-an invoice from the tax office, declaring late payment interest one was paid,
-in both languages — were refused in all of six runs after the frame.
+The last results, three runs in Frankfurt, are in
+[svar/README.md](../README.md#measured).
 
 ## grounding_probe — what the grounding check withholds, in German too
 
 ```bash
-python -m svar.scripts.grounding_probe --region eu-west-1 --out grounding.json
+python -m svar.scripts.grounding_probe --region eu-central-1 --out grounding.json
 ```
 
 The grounding check reads English, French and Spanish only, the user guide
 says, and Svar answers in German too. This measures what that does, on right
 answers and on made-up ones, before a change to the check or the prompt is
 deployed. The script creates a guardrail of its own, `andur-grounding-probe`,
-a copy of the answer guardrail as the stack would deploy it — the topics on
-the question only while `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS` is set, none
-after the second deploy of 06.10.2026, the masking, grounding and relevance
-at their thresholds,
-the EU guardrail profile and the messages; a test holds it against the
-synthesised template. For every answer of `grounding-answers.json` it
+a copy of the answer guardrail as the stack would deploy it — the masking,
+grounding at the region's threshold (0.8 in eu-central-1) and relevance at
+0.7, and the messages, in the region and without a guardrail profile; a test
+holds it against the synthesised template. For every answer of `grounding-answers.json` it
 retrieves the passages of its question from the deployed knowledge base and
 builds them into the sources text the way the function does
 (`retrieve_passages`, `keep_workspace`, `build_sources`), and sends sources,
 question and answer through `ApplyGuardrail` as OUTPUT in the three blocks the
 model call gives the guardrail: `grounding_source`, `query`, `guard_content`.
-Checked this way, de11's answers scored what they had on the model call on
-04.10.2026 (0.54, 0.85, 0.25), and in two runs on 06.10.2026 every one of the
-142 answers scored the same as written, so each is checked once. The probe is deleted at the end, also when the run
-fails; a guardrail of that name left by a killed run stops the next one, as
-with `topic_probe`.
+Each answer is checked once. The probe is deleted at the end, also when the run
+fails; a guardrail of that name left by a killed run stops the next one and
+is named by its id; delete it with `aws bedrock delete-guardrail`. It never
+deletes a guardrail of another name.
 
 A German answer the check withholds is checked once more in English:
 translated, with its question, by the answer model through the probe
@@ -424,48 +260,8 @@ Every invented claim was searched for in the documents first; one wrong value
 is a number the documents give for something else ("10 Jahre" for de11, where
 the timber guarantee is 10 years), as the model could write it.
 
-Measured on 06.10.2026, two runs. The verdicts were the same in both. Of
-the 46 English checks, six got another wording of the translation the second
-time, and three the same wording with another score (0.70 and 0.71, 0.93 and
-0.94, and the relevance of "We do not offer an emergency service [2]." 0.50
-and 0.39):
-
-| Answers | Count | Passed as written | Passed with the English check |
-|---|---|---|---|
-| right, German on English documents | 19 | 16 | 18 |
-| right, German on German documents | 19 | 19 | 19 |
-| made up, German on English documents | 34 | 14 | 20 |
-| made up, English on English documents | 34 | 16 | — |
-| made up, German on German documents | 36 | 13 | 16 |
-
-| Made up, withheld as written | wrong value | added claim | invented |
-|---|---|---|---|
-| German on English documents | 8/12 | 5/11 | 7/11 |
-| English on English documents | 6/12 | 5/11 | 7/11 |
-| German on German documents | 12/12 | 2/12 | 9/12 |
-
-- **The check withholds about half of what is made up, in English too:** 18
-  of 34 English answers, 20 of the 34 German twins, 23 of 36 German answers
-  on German documents. Of the English wrong values 6 of 12 passed; of the
-  invented additions to a right fact 22 of 34 passed, the three groups
-  together.
-- **On German documents it passed every right German answer** (0.88 to
-  0.99), and withheld more of the made-up ones than on English documents.
-- **On English documents it withheld 3 of 19 right German answers:** "25 %
-  [1]" for relevance (0.39), "Die Garantie gilt für 5 Jahre [1][4]." (0.54)
-  and its long form (0.25).
-- **The English check freed 2 of those 3** (0.95 and 0.81 in English), and let
-  6 made-up German answers on English documents and 3 on German documents
-  through that the check withholds as written — among them "Die Garantie gilt
-  für 10 Jahre [1][4]." (0.63, in English 0.76) and "Ein Supportmitarbeiter
-  darf höchstens 7 Tage …" (0.63, in English 0.70 and 0.71, at the threshold). With a threshold of its own of 0.9
-  it freed only "25 % [1]" and still let one made-up answer on German
-  documents through. A lower threshold on the answer as written freed one
-  right answer at 0.5 and let 7 more made-up ones through.
-- An English check took 1.35 to 2.13 seconds (median 1.56, 46 checks, four
-  at once, from outside AWS) and 0.0013 USD on average: 121 tokens in and 40
-  out, one topic and one PII unit, and the second check's grounding and PII
-  units. A run costs 0.22 USD.
+The last results at 0.8 in Frankfurt are in
+[svar/README.md](../README.md#measured).
 
 `grounding-partial-answers.json` holds 16 answers to the partial questions of
 the control set (c09, c10, c11, c24, c32), taken with `--answers`: the right
@@ -486,8 +282,7 @@ answer to English documents); the right part with a sentence naming the rest
 passed for c10 (0.82), c09, c11 and c32 (0.95 to 0.97); c10 with both that
 sentence and the fixed one was withheld (0.78), with the fixed one alone it
 passed (0.81). Three of the four invented rests were withheld (0.03 to 0.17);
-c32's "On a late balance we charge 8 % interest a year [1]." passed at 0.92,
-as English added claims did on 06.10.2026.
+c32's "On a late balance we charge 8 % interest a year [1]." passed at 0.92.
 
 
 ## control_eval — which model stays with its sources, in Frankfurt
@@ -496,7 +291,6 @@ as English added claims did on 06.10.2026.
 python -m svar.scripts.control_eval --out results.json                  # every model in FRANKFURT_MODELS
 python -m svar.scripts.control_eval --model "Nova Pro" --only c12       # one model, one question
 python -m svar.scripts.control_eval --workspace kalvenstett             # only one workspace's questions
-python -m svar.scripts.control_eval --topics-tier standard              # the tier deployed in eu-west-1, with the EU profile
 python -m svar.scripts.control_eval --regrade results.json              # mark a saved run again, no AWS call
 ```
 
@@ -511,21 +305,19 @@ only the questions of one workspace and ends with 2 when it has none.
 
 Every question goes through `answer_question` like in `evaluate`, but the
 model and the guardrails run in `--region` (default `eu-central-1`): the
-script creates probe guardrails there, copies of the stack's answer and
-excerpt guardrails, and deletes them after the run, also after a failure.
-With the default `--topics-tier model` in eu-central-1 the region's topic
-model checks the topics, as the function does there. `--topics-tier classic`
-adds a third probe, the topic guardrail in the Classic tier and without a
-guardrail profile, the only way a topic guardrail stays in Frankfurt; the
-Standard tier needs a profile (AWS refused it without one on 06.10.2026:
-"Enable cross-Region inference for your guardrail to use Standard tier").
+script creates two probe guardrails there, `andur-control-answer-probe` and
+`andur-control-excerpt-probe`, copies of the stack's answer and excerpt
+guardrails, and deletes them after the run, also after a failure. The
+region's topic model checks the topics, as the function does.
 Retrieval stays with the deployed knowledge base in `--retrieve-region`
 (default `eu-central-1` as well), once per question, and every model gets the same passages; they are saved
 with the run. Prices and their date come from the table of `--region` in
-`taug/infra/answer_models.py` (`REGIONS`): a run of Nova Pro with
-`--region eu-west-1` counts Ireland's token prices, one with
-`--region eu-central-1` Frankfurt's. The wording of the system prompt comes
+`taug/infra/answer_models.py` (`REGIONS`). The wording of the system prompt comes
 from `prompt_of` in `svar/infra/answer_prompts.py`, by the model's name.
+
+`--regrade` marks every model and question of a saved run again and refuses
+`--model`, `--only` and `--workspace`; it refuses a saved run from a region
+that has no table in `taug/infra/answer_models.py` and rewrites nothing then.
 
 The marks, each on what the model wrote before any guardrail replaced it
 (Bedrock keeps that text in the guardrail trace):
@@ -547,7 +339,7 @@ The marks, each on what the model wrote before any guardrail replaced it
 - **German in German** — the commoner words of the answer are German; an
   answer too short to tell ("179 Euro [1]") counts for neither.
 - **Refused** — an advice question blocked by a guardrail or declined by the
-  model; in brackets the ones the topic filter itself blocked. **Own advice**
+  model; in brackets the ones the topic check itself blocked. **Own advice**
   lists the advice questions where the model wrote advice with a number or a
   forbidden spelling of its own, whether a guardrail withheld it or not.
 

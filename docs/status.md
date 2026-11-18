@@ -9,7 +9,6 @@ The operator updates it with every deploy and every measurement run.
 | Region | Stacks | Code | Last deploy | What it is |
 |---|---|---|---|---|
 | `eu-central-1` (Frankfurt) | `TaugStack`, `AndurStack` | `b97596a` | 11.11.2026 | The stack that runs. Taug's seven resources were moved into `TaugStack` that night and both stacks deployed; `cdk diff` against this code then showed no difference in either stack ([decisions.md, 11.11.2026](decisions.md#2026-11-11-move-ran-in-frankfurt)). |
-| `eu-west-1` (Ireland) | `AndurStack`, `TaugStack` | `037086b` | 10.11.2026 | Not carried on and to be deleted. It stands at the last commit before the move: Taug's seven resources are still in `AndurStack`, and `TaugStack` holds only the key retirer. Do not deploy the current code there ([Deploy](operating.md#deploy)). |
 
 The code is named by its commit on `main`; later commits that change only documents or tests
 leave the deployed templates as they are. The stacks themselves are described in
@@ -22,7 +21,6 @@ leave the deployed templates as they are. The stacks themselves are described in
 | `eu-central-1` | 11.11.2026 | The rehearsal of a new workspace after the move, with every measurement it runs | [svar/README.md](../svar/README.md#measured) |
 | `eu-central-1` | 14.10.2026 | The 42 questions built to tempt a model (`control_eval`), not repeated since | [svar/README.md](../svar/README.md#measured) |
 | `eu-central-1` | 21.10.2026 | The models Vard is measured with | [vard/README.md](../vard/README.md) |
-| `eu-west-1` | 16.10.2026 | The English questions with Nova Pro | [svar/README.md](../svar/README.md#ireland-16102026-nova-pro) |
 
 ## Waiting for the next deploy
 
@@ -30,12 +28,16 @@ Each of these sits in the answer function's code package or in a template, so ch
 changes what AWS gets. They wait for the next deploy that changes the function or the
 template anyway.
 
-- `taug/infra/keys.py`: the key retirer's description, "Answers the Delete of retired Andur
-  key resources", is in `TaugStack`'s template; in `TaugStack` no resource sends it a Delete.
-- `taug/infra/api_keys/handler.py`: its module docstring still speaks of the one stack that
-  held the key resources, and it names `scripts.workspace` and `scripts/workspace.py` in its
-  docstring and in two messages, now `taug.scripts.workspace`
-  (`taug/tests/test_api_keys_resource.py` matches the message and changes with it).
+- The answer function for Frankfurt alone (*The code builds Frankfurt alone*,
+  2026-11-18 in [decisions.md](decisions.md#2026-11-18-frankfurt-alone)): it
+  checks the topics with the topic model alone, always serves the page, and no longer reads
+  `PRICE_TOPIC_PER_1K_UNITS`; the page no longer sends `x-amz-content-sha256`. `AndurStack`
+  changes in three places: the function's code key, the page layer's asset, and that one
+  variable gone from the function's environment.
+- `TaugStack` without the key retirer: seven resources go (the function, its provider, their
+  roles, policy and two log groups), and its `CDKMetadata` changes. Its handler,
+  `taug/infra/api_keys/`, is no longer built; its files and
+  `taug/tests/test_api_keys_resource.py` wait for the operator's word to be deleted.
 - `svar/app/__init__.py`: its docstring names `scripts/workspace.py`, now
   `taug/scripts/workspace.py`.
 - `svar/app/plans.py`: its docstring and one comment name `python -m scripts.workspace`, now

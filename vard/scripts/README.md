@@ -13,7 +13,8 @@ Two commands, both run from the repository root. What the scripts need (install,
 python -m vard.scripts.tool_probe --model "Nova Pro" --out tools.json
 ```
 
-It measures whether each model of `FRANKFURT_MODELS` fills in one tool
+It measures whether each model of the table of `--region` (`FRANKFURT_MODELS`
+in eu-central-1) fills in one tool
 cleanly and asks back instead of guessing. `tool-cases.json` holds six
 conversations for one tool, `record_order` (material, quantity, unit, site,
 delivery date, all required), sent through `converse` without guardrail or
@@ -117,5 +118,5 @@ that fails, since neither says anything about the model. A case file or an
 `--out` that fails ends the run with exit code 2 the same way as in
 `tool_probe`. `--region` takes the
 models and prices
-`taug/infra/answer_models.py` gives that region: Frankfurt by default, Ireland with
-`--region eu-west-1`; a region without a table there is refused.
+`taug/infra/answer_models.py` gives that region, as `tool_probe` does: Frankfurt,
+the default and only region; a region without a table there is refused.

@@ -65,9 +65,8 @@ this order, each step timed on its own:
    a crash or a timeout. Run alone with `--only`, the log step sees only its
    own seconds.
 
-`--region` takes only a region whose function is its own address, today
-`eu-central-1`: behind CloudFront the address checks could never pass. The
-deploy time names when the deploy finished, since a deploy that changed nothing
+`--region` takes the regions of `REGIONS` in `taug/infra/answer_models.py`,
+today `eu-central-1` alone. The deploy time names when the deploy finished, since a deploy that changed nothing
 leaves no event and the last one may be older. The stacks are Svar's,
 `AndurStack` (`--stack-name`), and Taug's, `TaugStack` (`--taug-stack-name`);
 the run reads the outputs of both and hands both names to every script it

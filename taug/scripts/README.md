@@ -20,16 +20,14 @@ Three commands, all run from the repository root:
   are read from the outputs of Taug's stack, `TaugStack`; web address and budget
   table from those of Svar's, `AndurStack`. Without `--region` both in `eu-central-1`,
   `DEFAULT_REGION` of `taug/infra/answer_models.py`, whatever region a shell profile names.
-  The stacks that run are in Frankfurt, and every command here names
-  `--region eu-central-1` all the same; Ireland's stack stands at older code, its `TaugStack`
-  holds none of these outputs, and it is not carried on
-  ([docs/status.md](../../docs/status.md)). Each value can be passed by hand
-  instead:
+  The stacks run in Frankfurt alone, and every command here names
+  `--region eu-central-1` all the same ([docs/status.md](../../docs/status.md)).
+  Each value can be passed by hand instead:
   `--bucket`, `--knowledge-base-id`, `--data-source-id`, `--url`, and
   `--region` and the stack names for other stacks: `--stack-name` is Taug's
   stack in Taug's scripts and Svar's in `ask`; `workspace` takes Svar's as
   `--svar-stack-name`, `ask` Taug's as `--taug-stack-name`. `--url` takes the web
-  address, not the function URL — `ask` appends `/ask` to it itself.
+  address, `WebUrl` — `ask` appends `/ask` to it itself.
 
 ## ingest
 

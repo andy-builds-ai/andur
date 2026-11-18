@@ -34,7 +34,7 @@ head says how to renew it.
 ## Checks
 
 Run all three before you finish. CI (`.github/workflows/ci.yml`) runs the
-same, and then `cdk synth` for both regions. The three need no AWS; the tests
+same, and then `cdk synth` for Frankfurt. The three need no AWS; the tests
 took about a minute.
 
 ```bash
@@ -73,13 +73,12 @@ templates, synthesize without a login, as CI does; then no account appears.
 ## Rules
 
 - **Only the operator deploys.** Never run `cdk deploy` or `cdk destroy`.
-- **Region is `eu-central-1` by default** (`DEFAULT_REGION` in
-  `taug/infra/answer_models.py`): Frankfurt, where Svar runs.
-  `cdk synth -c region=eu-west-1` and each script's `--region eu-west-1` pick
-  Ireland, whose stack stands at older code and is not carried on
-  (`docs/status.md`). Frankfurt has its own models, checks
+- **The region is `eu-central-1`, Frankfurt, alone** (`REGIONS` and
+  `DEFAULT_REGION` in `taug/infra/answer_models.py`;
+  [decisions.md](docs/decisions.md#2026-11-18-frankfurt-alone)).
+  Frankfurt has its own models, checks
   the denied topics with gpt-oss-120b in the region (`svar/app/topic_model.py`),
-  keeps masking and grounding off the EU profile, and has no CloudFront: the
+  keeps masking and grounding in the region, and has no CloudFront: the
   function's URL serves page and `/ask` (`svar/app/page.py`). A command
   against the running stacks still names `eu-central-1`, so a copied line
   holds whatever the default. `cdk diff` compares both stacks without
@@ -111,7 +110,7 @@ templates, synthesize without a login, as CI does; then no account appears.
   why the name does not give, longer reasons in `docs/decisions.md`. ruff
   checks it (D100 to D104, D106 in `pyproject.toml`).
 - **A changed byte in a code package changes the template.** `svar/app/`,
-  `taug/__init__.py`, `taug/access/`, `taug/infra/api_keys/`,
+  `taug/__init__.py`, `taug/access/`,
   `svar/infra/deploy_drain/` and `svar/web/` (each `README.md` aside) go into
   Lambda or the page as they are. A change there, even a comment, waits for
   the next deploy of what it changes; list it in `docs/status.md` meanwhile.
@@ -127,10 +126,9 @@ date given.
 | `python -m svar.scripts.evaluate` | real models on AWS | real money, no figure given | |
 | `python -m taug.scripts.ingest`, `taug.scripts.retrieve`, `taug.scripts.workspace`, `svar.scripts.ask` | the deployed stacks; see `taug/scripts/README.md` and `svar/scripts/README.md` | | |
 | `python -m taug.scripts.workspace remove --yes` | deletes a workspace's key, budget and documents: never without the operator's word | | |
-| `python -m svar.scripts.topic_probe --region eu-west-1` | creates and deletes a guardrail named `andur-topic-probe` | 0.113 USD a run on 10.11.2026 | `DENIED_TOPICS` |
-| `python -m svar.scripts.topic_probe --region eu-central-1` | measures the Frankfurt topic check | three runs of 319 checks, 0.30 USD on 07.10.2026, 0.302 USD on 10.11.2026 | that prompt, and `check_topics_with_model` in `svar/app/topic_check.py` |
-| `python -m svar.scripts.grounding_probe --region eu-west-1` | creates and deletes a guardrail named `andur-grounding-probe` | 0.22 USD a run on 06.10.2026 | the grounding check or the prompt |
-| `python -m svar.scripts.control_eval` | creates and deletes up to three guardrails named `andur-control-*-probe` in eu-central-1 | 42 questions: 0.063 to 0.086 USD per Frankfurt model, 0.11 USD for Nova Pro, 0.33 USD for Claude Sonnet 4.6 on 06.10.2026 | |
-| `python -m vard.scripts.tool_probe` | models of `FRANKFURT_MODELS` | fractions of a cent per model | |
+| `python -m svar.scripts.topic_probe --region eu-central-1` | measures the Frankfurt topic check | three runs of 319 checks, 0.30 USD on 07.10.2026, 0.302 USD on 10.11.2026 | that prompt, and `check_topics` in `svar/app/topic_check.py` |
+| `python -m svar.scripts.grounding_probe --region eu-central-1` | creates and deletes a guardrail named `andur-grounding-probe` | not measured in eu-central-1 | the grounding check or the prompt |
+| `python -m svar.scripts.control_eval` | creates and deletes two guardrails named `andur-control-*-probe` in eu-central-1 | 42 questions: 0.063 to 0.086 USD per Frankfurt model, 0.11 USD for Nova Pro, 0.33 USD for Claude Sonnet 4.6 on 06.10.2026 | |
+| `python -m vard.scripts.tool_probe` | the models of the table of `--region` | fractions of a cent per model | |
 | `python -m scripts.rehearsal` | sets up a workspace with its key on the deployed stacks and runs the measurements above against it; `--list` calls nothing | 0.70 USD on 07.10.2026 (at most 0.75) | |
 | `python -m vard.scripts.receiving_probe` | every model of `FRANKFURT_MODELS` checks 24 delivery notes through Vard's loop (`vard/`), `--repeat` rounds of them; no call that could take the run past `--max-usd` (2.25 USD by default) | a full run of the eleven models on the first twelve cases cost 0.488 and 0.490 USD on 20.10.2026; on 21.10.2026 the 24 cases in three rounds cost 0.599 USD for the four candidates, 0.708 USD for Claude Sonnet 4.6 (one round) and 0.382 USD for three models with `--vendor-settings` | `vard/` or its cases |

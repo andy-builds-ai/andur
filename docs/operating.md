@@ -6,27 +6,13 @@ Deploy, fill, ask, test and tear down.
 
 Needs Python 3.11+ (tested on 3.14), Node.js 22, the AWS CDK CLI
 (`npm install -g aws-cdk@2.1146.0`) and AWS credentials for the target
-account. Svar runs in `eu-central-1` (Frankfurt), so every command line here
-names it, and a command the text only names, such as `cdk deploy --all`,
-means it with `-c region=eu-central-1` ([Another region](#another-region);
-what runs where: [status.md](status.md)). The one exception is the
-measurement of the topic guardrail, which only Ireland's stack has; it names
-`eu-west-1`. Without `-c region=`, which picks a region of
-`REGIONS` in `taug/infra/answer_models.py`, everything goes to `eu-central-1`
-(Frankfurt), the default region; Ireland only with `-c region=eu-west-1`.
-
-Ireland has not been moved. Taug's seven resources (the documents bucket and
-its policy, the vector bucket, the index, the knowledge base role, the
-knowledge base and its data source) are still in `AndurStack` there, and the
-stack is to be deleted later
-([decisions.md, 11.11.2026](decisions.md#2026-11-11-move-ran-in-frankfurt)). `cdk deploy
---all -c region=eu-west-1` aims at Ireland. Deployed from this code, CDK
-would build the seven again in `TaugStack` and remove them from `AndurStack`.
-The build is expected to fail at the documents bucket's fixed name and roll
-back; that has not been tried. `cdk diff -c region=eu-west-1` shows the
-change first. Do not
-deploy Ireland from here without moving first
-([Moving resources between stacks](#moving-resources-between-stacks)).
+account. Svar runs in `eu-central-1` (Frankfurt) alone, so every command line
+here names it, and a command the text only names, such as `cdk deploy --all`,
+means it with `-c region=eu-central-1` ([The region](#the-region);
+what runs where: [status.md](status.md)). Without `-c region=`, which picks a
+region of `REGIONS` in `taug/infra/answer_models.py`, everything goes to
+`eu-central-1`, the default and only region
+(the entry of 18.11.2026 in [decisions.md](decisions.md)).
 
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
@@ -51,28 +37,28 @@ base id, the data source id, the bucket names and the Parameter Store path of
 the workspace keys; `AndurStack` the web address (`WebUrl`) and the budget
 table. The scripts read them from there, and
 `aws cloudformation describe-stacks --region eu-central-1 --stack-name TaugStack` (or `AndurStack`)
-shows them again. It also uploads `svar/web/` into
-the site bucket and clears the CloudFront caches, so the page is whatever is
+shows them again. It also packs `svar/web/` into
+the answer function's page layer, so the page is whatever is
 in `svar/web/` at the moment of the deploy.
 
-### Another region
+### The region
 
-`REGIONS` in `taug/infra/answer_models.py` says what a stack answers with in each
-region. In eu-central-1 (Frankfurt) that is Qwen3 235B in the region itself,
-and gpt-oss-120b in the region checks the denied topics instead of a topic
-guardrail: the Standard topic tier, which reads German, goes only with the EU
-guardrail profile, which carries its checks to six EU regions (*Guardrails
-and cost* in [decisions.md](decisions.md)). Masking and the grounding check
-run there without a profile, so no guardrail of the Frankfurt stack uses one.
+`REGIONS` in `taug/infra/answer_models.py` says what the stack answers with.
+In eu-central-1 (Frankfurt) that is Qwen3 235B in the region itself,
+and gpt-oss-120b in the region checks the denied topics: the guardrail tier
+that reads German goes only with the EU guardrail profile, which carries its
+checks to six EU regions (*Guardrails and cost* in
+[decisions.md](decisions.md)). Masking and the grounding check run in the
+region without a profile.
 A topic the model names on its first call stands unless two more calls at
 once both name none; each topic lifted that way is a `topic-model-unconfirmed`
 line in the function's log, with the topic and the side it was read on.
-Frankfurt has no CloudFront, which answers at edge locations worldwide and
+There is no CloudFront, which answers at edge locations worldwide and
 cannot be kept to Germany: the answer function's URL in eu-central-1 is the
 one address. It is open (`AuthType NONE`); the workspace key in `X-Andur-Key`
-is the gate, as it is behind CloudFront. The function serves the page itself,
-from a layer with the files of `svar/web/`, and sets the security headers
-CloudFront's policy sets in Ireland (`svar/app/page.py`). `WebUrl` among the
+is the gate. The function serves the page itself,
+from a layer with the files of `svar/web/`, and sets security headers on
+every response (`svar/app/page.py`). `WebUrl` among the
 outputs is that URL, `https://<id>.lambda-url.eu-central-1.on.aws/`; the stacks put
 no domain of its own and no WAF in front of it. The region and the account come
 from outside: the region from `-c region=`, the account from the AWS profile.
@@ -86,16 +72,12 @@ A new account may allow only 10 concurrent Lambda executions, all of which
 Lambda keeps unreserved, so the reservation of `ANSWER_MAX_CONCURRENCY` fails
 the deploy there. `-c answer_max_concurrency=none` leaves it out, and the
 account's limit caps the function; raising that limit is a Service Quotas
-request (`L-B99A9384`). Without CloudFront every file of the page is a call
+request (`L-B99A9384`). Every file of the page is a call
 of the function too, so loading the page takes up to five executions for a
-moment; Frankfurt therefore reserves `ANSWER_MAX_CONCURRENCY` plus
+moment; the stack therefore reserves `ANSWER_MAX_CONCURRENCY` plus
 `PAGE_LOAD_CONCURRENCY`, 5 + 5 = 10, and an account needs room for that
 beside the 10 Lambda keeps unreserved. Without the reservation, the page and
-the questions share whatever the account allows. Every script then takes `--region eu-central-1`.
-
-The first deploy of the distribution takes a few minutes longer than the
-others: CloudFront rolls a new configuration out to its edge locations before
-the stack reports success.
+the questions share whatever the account allows. Every script takes `--region eu-central-1`.
 
 A deploy that changes a guardrail setting makes a new guardrail version, and
 no question fails for it, at any hour. The answer role allows every numbered
@@ -107,7 +89,7 @@ cleanup phase, and before that the deploy waits 225 seconds (210 until
 `Custom::AndurDeployDrain`: such a deploy takes about four minutes longer, a
 deploy without a new version does not wait, unless the wait itself changes
 (a stack built from nothing waits once, for no one). A new guardrail
-the function calls, such as the topic guardrail of 05.10.2026, adds nothing:
+the function calls adds nothing:
 CloudFormation creates it, and widens the role for it, before it updates the
 function, and the old code never calls it. After a deploy that touches the
 topics, `python -m svar.scripts.topic_probe --deployed --region eu-central-1`
@@ -124,33 +106,6 @@ function's configuration 5 to 7 seconds before its code (CloudTrail,
 28.09., 01.10. and 02.10.2026), and the old code reads the new environment
 meanwhile. Deploy first the code that works with old and new, then the
 change that takes the old away, as on 02./03.10.2026 for the key reading.
-
-The topic guardrail of 05.10.2026 comes in two deploys for the same reason.
-In the seconds the old code reads the new environment, it would call an
-answer guardrail that no longer reads the answer's topics, without the topic
-check it does not know yet: answers unchecked for their topics, though no
-error. So the first deploy keeps the answer guardrail reading the answer's
-topics as before (`ANSWER_GUARDRAIL_READS_ANSWER_TOPICS = True` in the
-stack module, a flag since gone) and brings the topic
-guardrail and the code that calls it; the answer is checked twice. The
-second sets it `False`: the answer guardrail gets a new version, and old and
-new code both check the answer without its citations.
-
-The check of the question by the topic guardrail, after its frame
-(06.10.2026), comes in two deploys the same way. The first deploy (06.10.2026)
-brought the code that checks the question there, and kept
-`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS = True`: the answer guardrail read
-the question's topics as before, and no guardrail got a new version. It
-waited once in `Custom::AndurDeployDrain`, since the function's timeout grew
-from 180 to 195 seconds and the wait with it (225 seconds, longer than an
-answer may run). The question was checked twice then, so a harmless question
-the answer guardrail refused stayed refused; nothing was freed yet. The
-second sets it `False`: the answer guardrail and the topic guardrail get new
-versions (the topic guardrail's description changes with the flag), the
-deploy waits in `Custom::AndurDeployDrain`, and old and new code both check
-the question with the topic guardrail. After the second, measure with
-`python -m svar.scripts.topic_probe --deployed --region eu-west-1`; only
-Ireland's stack has a topic guardrail.
 
 The deploy creates no workspace key, and no workspace is named in the stack's
 code. A workspace exists only in AWS: its key under
@@ -169,17 +124,15 @@ Parameter Store itself. Until a workspace has its key, every question to it
 is refused with 401.
 
 Resource names are mostly not generated by CloudFormation. The documents
-bucket, the site bucket, the vector bucket, the knowledge base role, the
+bucket, the vector bucket, the knowledge base role, the
 answer function (`andur-answer`) and its log group have fixed names; the
-bucket names and the account-wide names — the IAM role, the CloudFront
-response headers policy and the two origin access controls — carry the
+bucket names and the account-wide name of the IAM role carry the
 region. The index, the knowledge
 base and the data source carry a short digest of the settings that force a
 replacement, so a changed setting gives the replacement a new name instead
 of an "already exists" failure. Either way each stack is one instance per
 account and region: a second copy under other stack names collides with
-the first. A copy in another region does not, because every name that holds
-for the whole account carries the region.
+the first.
 
 A replaced knowledge base takes two deploys, because `AndurStack` imports its
 id and ARN from `TaugStack` (`cdk.json` keeps these references `strong`). A
@@ -230,11 +183,6 @@ The workspace keys are part of neither stack and stay; after a rebuild they
 work again, each with a fresh budget. To take a workspace away for good, use
 `python -m taug.scripts.workspace --region eu-central-1 remove` before the destroy.
 
-The site bucket and the distribution go with `AndurStack` too. The bucket is
-emptied first — the file copier removes what it uploaded — so the deletion
-does not stop at a bucket that is not empty. A new distribution has a new
-address, so `WebUrl` changes with every rebuild.
-
 ### Moving resources between stacks
 
 `cdk refactor --unstable=refactor` moves resources from one stack to another
@@ -242,8 +190,7 @@ without replacing them; it did so for the seven of Taug in Frankfurt on
 10./11.11.2026. Run `--dry-run` first: the moves it lists must be exactly the
 ones planned, and nothing may be added or removed. Compare the old templates
 with `?` in place of every character from U+0080 on, as CloudFormation returns
-them (*The move ran in Frankfurt; Ireland stays as it was*, 2026-11-11 in
-[decisions.md](decisions.md)).
+them ([decisions.md, 11.11.2026](decisions.md#2026-11-11-move-ran-in-frankfurt)).
 
 Without `--role-arn` the CLI moves with the bootstrap's deploy role. In
 bootstrap version 32 that role has only `cloudformation:CreateStackRefactor`
@@ -368,17 +315,11 @@ BODY='{"question": "How do I export project data?", "workspace": "quillmoor"}'
 curl -s -X POST "$WEB_URL/ask" \
   -H "X-Andur-Key: $KEY" \
   -H "Content-Type: application/json" \
-  -H "x-amz-content-sha256: $(printf '%s' "$BODY" | sha256sum | cut -d' ' -f1)" \
   -d "$BODY"
 ```
 
 `$KEY` is the workspace key ([svar/app/README.md](../svar/app/README.md#getting-a-key)).
-In Frankfurt `WebUrl` is the function's own URL. The hash header is for the
-way in through CloudFront, as in Ireland, where every request is signed;
-there `printf '%s'` and not `echo` matters: a trailing newline would go into
-the hash but not into the body, and the request would be refused. In Ireland
-the output `FunctionUrl` of `AndurStack` is not an address to send this to —
-from outside the account it answers 403 to everyone but CloudFront.
+`WebUrl` is the function's own URL.
 
 ## Tests
 
@@ -387,9 +328,8 @@ pytest -q
 ```
 
 The stack tests render both stacks to CloudFormation JSON and assert on them,
-including the way in: the function URL on `AWS_IAM`, both invoke permissions
-bound to this distribution alone, the private site bucket, and the `/ask`
-behaviour with its methods, its disabled cache and its response timeout. Some
+including the way in: the function URL open (`AuthType NONE`) and allowing
+no other origin, and the web address that is that URL. Some
 of them read `svar/web/` itself, to keep the page from growing an address of its
 own, a key, a `console.log` or a file from another server. The handler tests
 drive the answer function through every status code against fake Bedrock,

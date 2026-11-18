@@ -19,11 +19,8 @@ stacks, their resources and the code carry Andur's name (`AndurStack`,
 `X-Andur-Key`, `andur-*`).
 
 Svar runs on AWS in Frankfurt (`eu-central-1`): a company's documents, the
-vectors, models, questions and answers stay in Germany. The same code also
-builds for Ireland (`eu-west-1`), behind CloudFront. A stack there, with only
-the two fictional demo companies of `knowledge/`, is where models and checks
-were measured against each other; it stands at older code, is not carried on
-and is to be deleted. What is deployed where, and since when:
+vectors, models, questions and answers stay in Germany. The code builds for
+Frankfurt alone. What is deployed where, and since when:
 [docs/status.md](../docs/status.md).
 
 ![An answer on Svar's page in Frankfurt, in German: the question, the answer citing [1], and the sources it rests on, each marked as written by a person](docs/screenshot-answer.png)
@@ -32,9 +29,7 @@ and is to be deleted. What is deployed where, and since when:
 
 ```mermaid
 flowchart TD
-    caller["Page or script"] -->|"HTTPS, key in X-Andur-Key"| way{"Way in"}
-    way -->|"Frankfurt: the function's own URL"| key
-    way -->|"Ireland: CloudFront"| key
+    caller["Page or script"] -->|"HTTPS to the function's own URL, key in X-Andur-Key"| key
     subgraph fn["Answer function (Lambda)"]
         key["1 Key opens this workspace?"] --> budget["2 Count the question"]
         budget --> search["3 Passages of this workspace"]
@@ -63,12 +58,11 @@ flowchart TD
 4. The question is checked for four denied topics: taking or facing legal
    action, a person's own tax return, medical advice, and the private lives
    of people, which includes any question about celebrities, politicians
-   and other public figures (`svar/app/denied_topics.py`). In Frankfurt
-   gpt-oss-120b does this in
-   the region; in Ireland a Bedrock guardrail. A refused question costs no
-   call of the answer model and returns no sources; in Frankfurt the check
+   and other public figures (`svar/app/denied_topics.py`). gpt-oss-120b does
+   this in the region. A refused question costs no
+   call of the answer model and returns no sources; the check
    itself is one to three calls of gpt-oss-120b.
-5. The answer model (Qwen3 235B in Frankfurt, Nova Pro in Ireland) gets the
+5. The answer model (Qwen3 235B) gets the
    passages and a prompt that tells it to answer from them alone and cite
    them. A guardrail on the same call masks names, e-mail addresses, phone
    numbers and addresses, and withholds the answer if the passages do not
@@ -108,23 +102,23 @@ Every decision is written down with its date and reason in
   ten questions within 48 hours of the first for a demo key, a monthly and a
   daily quota for a key on a plan. The price: whoever holds a key can ask
   until it is spent; a leaked demo key is a leak of ten questions.
-- **In Frankfurt the function's URL is the address, without CloudFront**
+- **The function's URL is the address, without CloudFront**
   ([decisions.md, 07.10.2026](../docs/decisions.md#2026-10-07-frankfurt-function-url)): no setting keeps
   CloudFront's edge locations inside Germany. The price: the stacks give the
   function no domain of its own and no WAF. What caps a flood is the number of executions Lambda allows at
-  once. The stack reserves 10 executions for the function there: 5 for
+  once. The stack reserves 10 executions for the function: 5 for
   questions and 5 more for loading the page, in one pool that questions may
   take whole, and that reservation is the cap
-  ([docs/operating.md](../docs/operating.md#another-region)).
-- **In Frankfurt a model in the region checks the topics**
+  ([docs/operating.md](../docs/operating.md#the-region)).
+- **A model in the region checks the topics**
   ([decisions.md, 06.10.2026](../docs/decisions.md#2026-10-06-frankfurt-topic-guardrail-eu-profile),
   [07.10.2026](../docs/decisions.md#2026-10-07-frankfurt-gpt-oss-checks-topics)). Bedrock's topic guardrail reads
-  German only in its Standard tier, and that tier works only through an EU
+  German only in a tier that works only through an EU
   profile, which runs the check in six EU regions and so would carry it out
   of Germany. The older tier stays in Frankfurt but let through German advice
   questions. The price: a model call per check, 0.30 USD for 957 checks
   (below).
-- **The grounding check withholds at 0.8 in Frankfurt**
+- **The grounding check withholds at 0.8**
   ([decisions.md, 07.10.2026](../docs/decisions.md#2026-10-07-frankfurt-grounding-0-8)), the threshold that
   withheld the most made-up answers without withholding a right answer to
   German documents. The price: it withholds right German answers to English
@@ -163,7 +157,7 @@ sentence a reader gets when a key's quota is full, and the deploys of 10. and
 11.11.2026 moved Taug's resources into a stack of their own and changed one
 German example sentence of the denied topics
 ([decisions.md, 11.11.2026](../docs/decisions.md#2026-11-11-move-ran-in-frankfurt)).
-The Ireland numbers were measured on 16.10.2026. How each script works:
+How each script works:
 [svar/scripts/README.md](scripts/README.md).
 
 ### Frankfurt, 11.11.2026, Qwen3 235B
@@ -203,22 +197,6 @@ firm's key was already there, so it gives no such time.
 - The German documents of the fictional craft firm are not in this
   repository, so the German-on-German results cannot be repeated from it.
 
-### Ireland, 16.10.2026, Nova Pro
-
-| What | Result |
-|---|---|
-| English questions on English documents | 30 of 30 right in each of two runs; all 22 answerable ones cite the expected document |
-| Median time per question, retrieval to cost line, from a laptop in Germany | 2.9 s and 2.8 s |
-
-Each answer model now has the prompt it was measured with: Nova Pro the one
-of 06.10.2026, Qwen3 235B in Frankfurt its own, unchanged
-([decisions.md, 14.10.2026](../docs/decisions.md#2026-10-14-prompt-wording-per-model)). After the deploy of
-14.10.2026 Ireland had the prompt measured with Qwen3 235B and got 27 of 30
-in two runs: it made Nova Pro write "The sources do not answer this
-question." where the sources do. One question (q20) was right only 2 of 10
-times with either prompt when asked alone on 14.10.2026; it was right in both
-runs here, which is one sample and does not show a fix.
-
 ## Privacy and separation
 
 - **Where the data is.** In Frankfurt on 11.11.2026, all 10 places AWS
@@ -243,7 +221,8 @@ runs here, which is one sample and does not show a fix.
   the excerpts as the function returns them. In the Frankfurt run of
   11.11.2026, as on 14.10.2026, 50 of the 231 excerpts returned for the
   English questions carried a masked detail. The masking is statistical: a first name standing
-  alone stayed readable in two excerpts in a browser test on 23.09.2026, and
+  alone can stay readable
+  ([decisions.md](../docs/decisions.md#2026-09-23-masking-is-a-filter)), and
   it also masks what is no person, such as a company name in "{NAME}
   Customer Support". Documents that must not show a name to a reader must not
   hold it.
@@ -255,14 +234,12 @@ runs here, which is one sample and does not show a fix.
 - **Per question in Frankfurt, 11.11.2026:** 0.0024 USD on average for the
   English questions, 0.0014 for German questions on English documents and
   0.0021 for German questions on German documents, as on 14.10.2026.
-- **Per question in Ireland, 16.10.2026:** 0.0038 USD on average, Nova Pro.
 - **These averages are too low.** An answer the answer guardrail withheld
   carries `cost_usd: null`, because Bedrock reports no tokens for it although
   it charges the model call ([docs/costs.md](../docs/costs.md)). The averages
   count only the questions with a known cost: 3 of 30, 7 of 32 and 1 of 26
-  questions in Frankfurt on 11.11.2026 and 3 of 30 in each Ireland run had
-  none.
-- **The topic check in Frankfurt:** 0.30 USD for 957 checks on 11.11.2026.
+  questions in Frankfurt on 11.11.2026 had none.
+- **The topic check:** 0.30 USD for 957 checks on 11.11.2026.
 - **Setting up the craft firm** with all its measurements on 07.10.2026: 0.70
   USD, at most 0.75.
 
@@ -277,12 +254,11 @@ Prices, the counter, the page and how each number was taken:
 - **The topic check is not exact.** The same question can get a different
   verdict in another run; every change to the topics is measured first
   ([svar/scripts/README.md](scripts/README.md#topic_probe--what-the-denied-topics-refuse-before-a-deploy)).
-- **The grounding check withholds right answers.** In Frankfurt, German
-  answers to English documents; in Ireland the threshold is 0.7, AWS's own
-  example value, not a tuned one. Every answer logs both scores, so the
+- **The grounding check withholds right answers:** German answers to
+  English documents. Every answer logs both scores, so the
   threshold can be moved on evidence.
 - **The cost of a withheld answer is not counted** (above).
-- **The stacks give Frankfurt no domain of its own and no WAF.** The page and `/ask` are
+- **The stacks give the function no domain of its own and no WAF.** The page and `/ask` are
   the function's URL, `https://<id>.lambda-url.eu-central-1.on.aws/`; the
   workspace key is the gate there.
 - **The demo corpus is small:** 37 Markdown documents of two fictional
@@ -294,11 +270,9 @@ How to set up the repository and run the checks, which need no AWS:
 [the overview](../README.md#build-and-test-it). Deploying needs AWS
 credentials as well.
 
-The commands below build both stacks in Frankfurt, the default region, and
-name it all the same. Ireland takes `-c region=eu-west-1` and
-`--region eu-west-1`; its stack stands at older code and is not to be deployed
-from here ([docs/status.md](../docs/status.md),
-[docs/operating.md](../docs/operating.md#deploy)).
+The commands below build both stacks in Frankfurt, the default and only
+region, and name it all the same
+([docs/operating.md](../docs/operating.md#deploy)).
 
 ```bash
 cdk bootstrap aws://<account>/eu-central-1          # once per account and region
@@ -311,7 +285,7 @@ cdk destroy --all -c region=eu-central-1            # removes it; the documents 
 
 A new AWS account whose Lambda limit is 10 concurrent executions needs
 `-c answer_max_concurrency=none` on the `cdk` commands as well
-([docs/operating.md](../docs/operating.md#another-region)). Then open the output
+([docs/operating.md](../docs/operating.md#the-region)). Then open the output
 `WebUrl` of `AndurStack` in a browser; the page asks for a workspace and its key. How
 to get a key, what every field and status means, and how to ask with curl:
 [docs/operating.md](../docs/operating.md) and [svar/app/README.md](app/README.md).

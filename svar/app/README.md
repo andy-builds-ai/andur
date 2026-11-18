@@ -6,31 +6,19 @@ asked, retrieves passages from the knowledge base with a `workspace` filter,
 asks the answering model to answer from those passages only, and returns the
 answer with its sources and the layer of each source.
 
-The code builds this function for two regions, and they differ in the way in
-and the topic check. Svar runs in `eu-central-1` (Frankfurt): no CloudFront,
-the function's URL serves the page and `/ask`, and gpt-oss-120b in the region
-checks the denied topics. `eu-west-1` (Ireland) puts CloudFront in front and
-checks the topics with a guardrail; its stack stands at older code and is not
-carried on ([docs/status.md](../../docs/status.md)). A passage below that names
-CloudFront, the topic guardrail or the EU profile describes Ireland. The
-commands name `eu-central-1`.
+Svar runs in `eu-central-1` (Frankfurt) alone: no CloudFront, the function's
+URL serves the page and `/ask`, and gpt-oss-120b in the region checks the
+denied topics. The commands name `eu-central-1`.
 
-It has a Function URL, but that is not a way in from outside: the URL is set
-to `AWS_IAM`, and its resource policy names CloudFront alone, only for this
-stack's distribution. Inside the account a role with
-`lambda:InvokeFunctionUrl` can sign a call itself; the key, the workspace and
-the budget are checked in the function either way.
-Everything arrives through the web address — see *One address for everything*
-in [architecture](../../docs/architecture.md#one-address-for-everything).
-
-In eu-central-1 there is no CloudFront, and the Function URL is the way in:
+The Function URL is the way in, and everything arrives through it — see
+*One address for everything* in
+[architecture](../../docs/architecture.md#one-address-for-everything). It is
 set to `NONE`, with the two permissions Lambda asks for since October 2025
 (`lambda:InvokeFunctionUrl`, and `lambda:InvokeFunction` only through the
-URL). The key is the gate there as everywhere. With `PAGE_FOLDER` set, the
-function also serves the page (`page.py`): `GET` and `HEAD` on `/` and the
-page's own file names, nothing else of the folder; `/ask` goes on to the
-answer as before; every response carries the security headers CloudFront's
-policy sets in eu-west-1.
+URL). The key is the gate. The function also serves the page (`page.py`),
+from the folder `PAGE_FOLDER` names, which it needs to start: `GET` and
+`HEAD` on `/` and the page's own file names, nothing else of the folder;
+`/ask` goes on to the answer; every response carries the security headers.
 
 It runs only while a question is in flight; there is nothing to pay while
 nobody asks. Each step of a request has a module of its own, in the order a
@@ -58,7 +46,7 @@ question meets them:
 
 `aws.py` holds the AWS clients' timeouts and retries. `plans.py` holds the
 plans a key can carry (*Plans* below); `page.py` serves the
-page where no CloudFront stands in front (above); `topic_model.py` and
+page (above); `topic_model.py` and
 `denied_topics.py` hold the topic model's prompt and the denied topics.
 Lambda packages this folder and imports the modules by their plain names,
 `handler`, `aws` and the rest; the tests import them the same way
@@ -87,31 +75,19 @@ BODY='{"question": "How do I export project data?", "workspace": "quillmoor"}'
 curl -s -X POST "$WEB_URL/ask" \
   -H "X-Andur-Key: $KEY" \
   -H "Content-Type: application/json" \
-  -H "x-amz-content-sha256: $(printf '%s' "$BODY" | sha256sum | cut -d' ' -f1)" \
   -d "$BODY"
 ```
 
-`$WEB_URL` is the stack output `WebUrl`; `/ask` is the one path that reaches
-this function. `workspace` must be the workspace the key belongs to. A
-question is 1 to 1,000 characters. On macOS use `shasum -a 256` in place of
-`sha256sum`.
+`$WEB_URL` is the stack output `WebUrl`; `/ask` is the path that reaches
+the answer. `workspace` must be the workspace the key belongs to. A
+question is 1 to 1,000 characters.
 
 The body may also carry `"language": "de"` or `"language": "en"`: the
 language of the sentences Svar says itself, see *Language* below. Leave it
 out and they are English; the page sends it with every question, and
 `python -m svar.scripts.ask` with `--language`.
 
-Two headers are not the function's idea but the way in's:
-
-- **`X-Andur-Key`** carries the key. Not `Authorization`: CloudFront signs
-  every request it passes to the function URL and replaces that header with
-  its own signature, so a key sent there would never arrive.
-- **`x-amz-content-sha256`** carries the SHA-256 of the body, in hex. A
-  signed request to a Lambda function URL may not have an unsigned payload
-  ("Lambda doesn't support unsigned payloads"). Without the header the
-  request never reaches the function. `printf '%s'` and not `echo`: a
-  trailing newline would be part of the body for the hash but not for curl,
-  and the two would not match.
+**`X-Andur-Key`** carries the key, in a header of its own.
 
 ## Getting a key
 
@@ -402,10 +378,8 @@ Change a number there and deploy, and every key on that plan has the new
 number from its next question. `python -m taug.scripts.workspace` puts a key on a
 plan, when it adds the key or later, and takes it off again
 ([taug/scripts/README.md](../../taug/scripts/README.md#workspace--adding-and-removing-a-workspace)).
-The quota is there for a key in the wrong hands, not for the bill: at the
-measured mean of 0.0043 USD per answered question with Nova Pro at ten
-passages in Ireland ([docs/costs.md](../../docs/costs.md)), a month used to the last
-question is about 26 USD on `betrieb` and 65 USD on `firma`.
+The quota is there for a key in the wrong hands, not for the bill; what a
+question costs is in [docs/costs.md](../../docs/costs.md).
 
 **German time.** A month and a day are German calendar months and days: they
 begin at midnight in Germany, which is 23:00 UTC in winter and 22:00 UTC in
@@ -499,33 +473,7 @@ spent it.
 
 ## The answer
 
-An answer from us-east-1, 23.09.2026, before the move to eu-west-1:
-
-```json
-{
-  "answer": "Open the project and go to Settings > Export, then choose CSV ... [2]",
-  "sources": [
-    {
-      "number": 2,
-      "file": "faq--03-projects-and-exports.md",
-      "layer": "human",
-      "workspace": "quillmoor",
-      "score": 0.8147,
-      "words": 156,
-      "cited": true,
-      "excerpt": "# Haldrum — Frequently Asked Questions ## Projects and exports ..."
-    }
-  ],
-  "layers": ["human"],
-  "model": "nvidia.nemotron-super-3-120b",
-  "stop_reason": "end_turn",
-  "usage": {"input_tokens": 1883, "output_tokens": 75},
-  "guardrail": {"action": "none", "policies": []},
-  "cost_usd": 0.001031,
-  "price_date": "2026-09-23",
-  "latency_ms": 2483
-}
-```
+The fields of an answer:
 
 | Field | Meaning |
 |---|---|
@@ -536,7 +484,7 @@ An answer from us-east-1, 23.09.2026, before the move to eu-west-1:
 | `stop_reason` | Bedrock's stop reason; `null` when no model was asked. `max_tokens` means the answer was cut off, `content_filtered` that the model's own filter stopped it, `guardrail_intervened` that the guardrail blocked or masked something — `guardrail` says which. |
 | `usage` | Tokens in and out of the model call. |
 | `guardrail` | What the guardrail did: `action` is `none`, `masked` (personal details replaced by their type, such as `{PHONE}`, and a note at the end of the answer), `blocked` (the answer is a sentence of Svar's, which replaced the guardrail's own message) or `intervened` (Bedrock says it stepped in, the trace does not say how). `policies` names what acted: `topic:<name>`, `pii:<type>`, `grounding`, `relevance`. |
-| `cost_usd` | What this answer cost: model tokens and guardrail text units, each times its price, rounded to six places. `null` when the guardrail reported no units, because a cost without them would be too low; and `null` for an answer the guardrail withheld after the model wrote it, for which Bedrock reports no model tokens although it charges the model call (`model_tokens_unknown`). Retrieval, embedding and Lambda are not in it — together under a hundredth of a cent. |
+| `cost_usd` | What this answer cost: the tokens of the answer model and the topic model, and the guardrail text units, each times its price, rounded to six places. `null` when the guardrail reported no units, because a cost without them would be too low; and `null` for an answer the guardrail withheld after the model wrote it, for which Bedrock reports no model tokens although it charges the model call (`model_tokens_unknown`). Retrieval, embedding and Lambda are not in it. |
 | `price_date` | The day the prices behind `cost_usd` were read off the AWS pricing page. A price changes at AWS without a deploy here; the date says how old the number is. |
 | `latency_ms` | Time inside the function, from request to response. |
 
@@ -581,69 +529,49 @@ either. A client that does reads English.
 ## The guardrail
 
 Every model call goes through one Bedrock guardrail, on the same `converse`
-call (`guardrailConfig`). The denied topics are checked apart from it, by a
-guardrail of their own: in the question, after a fixed frame, before the
+call (`guardrailConfig`). The denied topics are checked apart from it, by
+gpt-oss-120b in the region: in the question, after a fixed frame, before the
 model is asked, and in the answer without its citations (*The topic check of
-the question and the answer* below). Nemotron 3 Super lists Guardrails among its features on the
-`bedrock-runtime` endpoint (its model card, read 23.09.2026); with Nova Pro
-through its EU profile the same guardrail refused, masked and withheld on
-the live page on 28.09.2026.
+the question and the answer* below).
 The execution role may invoke the model only with a numbered version of this
 guardrail named in the call; a call without it, with its draft or with any
 other guardrail is refused. Not the deployed version alone, so a deploy that
 makes a new version leaves the role as it is (`docs/decisions.md`,
 05.10.2026).
 
-Three policies, set in `svar/infra/guardrails.py`:
+The denied topics, checked by the topic model and by no guardrail: legal,
+tax and medical advice, and questions about public figures or a person's
+private life, in the question and in the answer (below). A refused
+question never reaches the model — the answer is the handler's refusal
+sentence, the status is still 200, and the question is spent.
+It comes back without sources: nothing was answered from them, and their
+excerpts would put the documents' text next to a refusal. An answer
+withheld for a topic comes back without sources too: an excerpt can tell
+what the answer was withheld for. An answer the grounding check withholds
+keeps its sources. The four topics are `Legal action`, `Tax returns`,
+`Medical advice` and `Private lives` (`denied_topics.py`), named and defined
+narrowly so that a customer's questions about the business's own prices,
+contracts, payment terms and warranty pass. Every change to them is
+measured first with `python -m svar.scripts.topic_probe`, on questions and on
+answers (`svar/scripts/README.md`).
 
-- **Refused topics:** legal, tax and medical advice, and questions about
-  public figures or a person's private life. The topic guardrail checks all
-  four in the question and in the answer (below). This guardrail read them
-  in the question too for the first of the two deploys that brought in the
-  check of the question, and reads none since the second
-  (`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS` in the stack, `docs/operating.md`).
-  A refused
-  question never reaches the model — the answer is the handler's refusal
-  sentence, the status is still 200, and the question is spent.
-  It comes back without sources: nothing was answered from them, and their
-  excerpts would put the documents' text next to a refusal. An answer
-  withheld for a topic comes back without sources too: an excerpt can tell
-  what the answer was withheld for. An answer the grounding check withholds
-  keeps its sources. The topics run in the
-  Standard tier, which reads German; the Classic tier reads only English,
-  French and Spanish and let 5 of 16 German refusals through (measured with
-  `ApplyGuardrail` on 01.10.2026). The Standard tier needs a guardrail
-  profile: the EU one, `eu.guardrail.v1:0`, which from eu-west-1 routes the
-  checks to six EU regions and no others (`GUARDRAIL_PROFILE_REGIONS`). The
-  answer role may apply the guardrail, and the topic guardrail, through that
-  profile in those six regions only. The four topics are `Legal action`, `Tax returns`,
-  `Medical advice` and `Private lives`, named and defined narrowly so that
-  a customer's questions about the business's own prices, contracts,
-  payment terms and warranty pass: under the names "Legal advice" and "Tax
-  advice", 21 of 64 harmless questions were refused. Every change to them is
-  measured first with `python -m svar.scripts.topic_probe`, on questions and on
-  answers (`svar/scripts/README.md`).
+Two policies, set in `svar/infra/guardrails.py`:
+
 - **Masked personal details:** names, e-mail addresses, phone numbers and
   addresses in the answer are replaced by their type, such as `{EMAIL}`. The
   question is not checked, and neither are the passages: the model reads the
   documents as they are, the reader gets the answer masked.
 - **Contextual grounding:** an answer the passages do not carry (grounding)
-  or that does not answer the question (relevance) is withheld. Both
-  thresholds are 0.7, the value the user guide works its example with; AWS
-  names no default. Every answered log line carries both scores, which is
+  or that does not answer the question (relevance) is withheld. The
+  grounding threshold is 0.8, measured for Qwen3 235B (`REGIONS` in
+  `taug/infra/answer_models.py`); the relevance threshold is 0.7, the value
+  the user guide works its example with (`RELEVANCE_THRESHOLD`); AWS names
+  no default. Every answered log line carries both scores, which is
   what a threshold is tuned by. The user guide lists English, French and
-  Spanish for this check and no tier that adds German. Measured on de11
-  (04.10.2026): the German answer "Die Garantie gilt für fünf Jahre, wenn
-  sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet
-  [1][4]." to English passages that say "5 years" scored 0.25 and was
-  withheld; the short "Die Garantie gilt für 5 Jahre [4]." scored 0.85 and
-  passed. On 142 fixed answers (06.10.2026, `python -m
-  svar.scripts.grounding_probe`): of right German answers it withheld 3 of 19 on
-  English documents and none of 19 on German ones; of made-up answers it
-  withheld about half, 18 of 34 in English, 20 of 34 in German on English
-  documents, 23 of 36 on German documents. It is a filter, not a proof that
-  an answer is right: a wrong number in a sentence the passages otherwise
-  carry passed 6 of 12 times in English. Checking a withheld German answer
+  Spanish for this check and no tier that adds German. What the check
+  withholds at 0.8, measured on fixed right and made-up answers, is in
+  [svar/README.md](../README.md#measured). It is a filter, not a proof that
+  an answer is right. Checking a withheld German answer
   once more in English was measured and not built, since it let made-up
   answers through that the check withholds (docs/decisions.md). The model's
   "not in the sources" sentence is in no passage, and the check withheld it
@@ -654,22 +582,19 @@ Three policies, set in `svar/infra/guardrails.py`:
 How the message tells them apart: the passages go in a `guardContent`
 block qualified `grounding_source` — the reference for the grounding check
 and nothing the other policies read. The question goes in a block qualified
-`query` and `guard_content` — the query for the relevance check, and text
-the topic filter reads. The trace's `guardrailCoverage` shows it: on the way
-in the guardrail read the question's characters only (107 of 8,682 for de11),
-on the way out the answer alone, without the question (04.10.2026). A query may be at most 1,000 characters, the same
+`query` and `guard_content` — the query for the relevance check. A query may be at most 1,000 characters, the same
 limit as a question; the grounding source at most 100,000, which is why a
 deployment may ask for at most 30 passages (`MAX_RESULTS`).
 
-"Private lives" is an approximation: the topic filter does
+"Private lives" is an approximation: the topic check does
 not see the documents, so it cannot know who is in them. It refuses
 questions about public figures and private lives; an answer about somebody
 the passages do not mention is caught by the grounding check instead. An
 answer that tells something private from the documents to a question it let
-pass is withheld by the topic check of the answer: all 8 such answers in
-`topic-answers.json`, in every one of three runs, also with the address
-masked as the reader would see it (05.10.2026). It is a classifier, not a
-promise. What a reader must never see does not belong in the documents.
+pass is meant to be withheld by the topic check of the answer; 8 such
+answers are among the answers to withhold in `topic-answers.json`, and how
+many of those were withheld is in [svar/README.md](../README.md#measured).
+It is a classifier, not a promise. What a reader must never see does not belong in the documents.
 
 The guardrail's version is a number, never `DRAFT`. A changed setting
 changes a digest in the version's description, and since that description is
@@ -677,9 +602,7 @@ create-only, the deploy makes a new version and hands its number to the
 function. The role allows every numbered version, so it stays as it is, and
 the deploy waits before the old version is deleted until no answer that
 started on it is still running (`docs/decisions.md`, 05.10.2026; see
-[docs/operating.md](../../docs/operating.md#deploy)). The topic guardrail's
-version is handled the same way: its `ApplyGuardrail` permission names the
-guardrail, whatever the version.
+[docs/operating.md](../../docs/operating.md#deploy)).
 
 What the trace says goes to the log, never what it matched: a masked phone
 number is logged as `pii:PHONE`, not as the number. The trace's copy of the
@@ -698,8 +621,8 @@ the handler cannot tell what happened. It tells by two things in the same
 response, both needed:
 
 1. `stopReason` is `guardrail_intervened`, and
-2. the trace holds a policy with the action `BLOCKED` — a topic in either
-   assessment, or the grounding or relevance check on the answer
+2. the trace holds a policy with the action `BLOCKED` — the grounding or
+   relevance check on the answer, or a topic, which this guardrail no longer reads
    (`read_guardrail`). A policy that only *masked* something is `ANONYMIZED`
    and does not count.
 
@@ -707,35 +630,30 @@ Then `question_refused` — a topic `BLOCKED` in the **input** assessment, the
 only place the question is read — says which sentence: the question was
 refused, or the answer was withheld. That held while this guardrail read
 the question's topics, until the second deploy of 06.10.2026; since then it
-reads none, and a question the topic guardrail refuses never reaches the
+reads none, and a question the topic check refuses never reaches the
 model call and gets the refusal sentence from the handler directly. A refused question never reaches the
 model, so there is no output assessment next to it. A stop reason without a
 blocking policy in the trace (`intervened`) keeps Bedrock's text and gets the
 note of `STOP_NOTES`, and a `BLOCKED` in the trace on a response Bedrock did
 not stop is the model's own text: neither is guessed at.
 
-What is measured and what is read off the shape: on the deployed function a
-refused question came back with one topic unit and no tokens, and a withheld
-one with no model tokens and `grounding` and `relevance` in
-`guardrail_policies` ([docs/costs.md](../../docs/costs.md); the log of
-30.09.2026). Nobody has read the raw trace of a *German* question, and the
-test traces in `svar/tests/test_handler.py` are hand-built in Bedrock's shape. The
+The test traces in `svar/tests/test_handler.py` are hand-built in Bedrock's shape. The
 condition does not look at the language of the question, only at the trace
 and the stop reason.
 
 ### The topic check of the question and the answer
 
 On the answer as the model writes it, the topics judged the citations along
-with the words: `Private lives` withheld 11 of 69 harmless answers with
-`[1][4]` behind them, 16 with `[1][2][4]`, up to 48 with `[1, 2, 4]`, and
-none without (04.10.2026, `docs/decisions.md`). And read alone, a customer's
+with the words, and harmless answers were withheld for their citations alone
+(04.10.2026, `docs/decisions.md`). And read alone, a customer's
 short question about the business's own invoice was refused as a tax
 question: "Wie viel Skonto darf ich abziehen, und bis wann muss ich dafür
 zahlen?", "Was passiert, wenn ich die Rechnung zu spät bezahle?", "Berechnen
 Sie eine Anfahrtspauschale?" (06.10.2026). So both are checked apart from the
-model call, by `andur-topic-guardrail` through `ApplyGuardrail`. That
-guardrail holds the four topics, read on both sides, in the same tier and EU
-profile, and nothing else.
+model call, by gpt-oss-120b in the region (`topic_check.py`,
+`topic_model.py`), which reads the four topics and names the one a text
+strays into, or none. A topic it names on its first call is asked again by
+two calls at once, and stands unless both name none (`CONFIRMING_CALLS`).
 
 - **The question** goes as `INPUT` after `QUESTION_FRAME`, "Customer to
   business: ", once the search has found passages and before the model is
@@ -754,55 +672,43 @@ question and 5 for the answer (`docs/decisions.md`, 06.10.2026), and it
 moves verdicts as a topic's definition does, so a change to them is measured
 with `python -m svar.scripts.topic_probe` like a change to the topics.
 
-A question the topic guardrail refuses gets the handler's refusal sentence,
-no sources, no model, no `stop_reason` and no tokens; `guardrail.policies`
-names the topic, and it costs the check's topic unit. An intervention that
-names no topic still refuses, as `topic:unknown`.
+A question the topic check refuses gets the handler's refusal sentence,
+no sources, no model, no `stop_reason` and no tokens of the answer model;
+`guardrail.policies` names the topic, and it costs the topic model's tokens.
 
 The answer is checked as the reader would get it, less the citations: masked
 where the answer guardrail masked (`{NAME}`), without the handler's note. If
-it blocks, the answer is the handler's withheld sentence and comes back
-without sources, and `guardrail.policies` names the topic, `topic:Private
-lives`, ahead of what was masked. An intervention that names no topic still
-withholds the answer, as `topic:unknown`.
+the check names a topic, the answer is the handler's withheld sentence and
+comes back without sources, and `guardrail.policies` names the topic,
+`topic:Private lives`, ahead of what was masked.
 
 No check runs where nothing is asked or given: no passage found (no check of
 the question, nothing goes to the model), a question refused, an answer the
 answer guardrail already withheld, an answer of citations alone. Each check
-counts its topic units into `cost_usd`, one per text under 1,000 characters,
-0.00015 USD; a check of the answer took 0.44 seconds per call measured from
-outside AWS (20 answers one after the other, 05.10.2026), and the check of
-the question is the same call on a shorter text, not measured on its own.
-They run one after the other, the question's before the model call.
+counts the topic model's tokens into `cost_usd`. They run one after the
+other, the question's before the model call.
 
-Both fail closed: a call that fails ends the request in 502 with the cause —
+Both fail closed: a check whose first call fails or gives no verdict is
+replaced by one more call, and when that one fails or gives no verdict too,
+the request ends in 502 with the cause —
 "The question could not be checked for the denied topics: …" before the
 model call, "The answer could not be checked …" after it — and nothing is
-answered or given unchecked. The log line is `topic-guard-failed` with the
-side (`INPUT` or `OUTPUT`) and the error code. The question has been counted
+answered or given unchecked. Each failed call is a `topic-model-failed` line
+with the side (`INPUT` or `OUTPUT`) and the call, each reply without a verdict
+a `topic-model-unreadable` line. The question has been counted
 by then. A check of the question that fails is given back to the key, unless
 a timeout caused it or the verdict could not be read; a check of the answer
 that fails stays counted, the model has answered by then (*Keys are budgets*).
 
-Measured with `python -m svar.scripts.topic_probe --region eu-west-1` on 06.10.2026, three runs, the
-probe guardrail built like the topic guardrail: 45 of 45 questions to refuse
-refused in every run, 1 of 87 harmless questions refused — "How much early
-payment discount can I deduct, and by when must I pay?" (`Tax returns`) —,
-32 of 32 answers to withhold withheld, 0 of 87 harmless answers withheld.
-Without the frames, on 05.10. and 06.10.2026, 2 of 64 harmless questions were
-refused in every run and the medical `rmd4` ("Die Schnittwunde muss nicht
-genäht werden, ein Pflaster reicht.") passed every time. The 276 harmless
-answers with `[1][4]`, `[1][2][4]`, `[2][4]` or `[1][5]` behind them were
-measured on 05.10.2026 without their citations and without the frame: none
-withheld (32 on the answer guardrail deployed until then).
+Measured with `python -m svar.scripts.topic_probe --deployed --region
+eu-central-1`: the results are in [svar/README.md](../README.md#measured).
 
 ### The excerpts
 
 The guardrail on the model call reads the answer. The `excerpt` of every
 source is the opening of a passage as the documents have it, and it goes to
-the page too — before build step 6 was finished, a name the answer had
-masked stood unmasked in the excerpt next to it (live probe, 23.09.2026). So
-the excerpts pass a second guardrail, `andur-excerpt-guardrail`, with one
+the page too, where a name the answer had masked could stand unmasked in the
+excerpt next to it. So the excerpts pass a second guardrail, `andur-excerpt-guardrail`, with one
 policy: the same four details, masked. No topics, so an excerpt about VAT is
 not refused as tax advice; no grounding, which has nothing to check an
 excerpt against; and one price, the sensitive information filter's.
@@ -826,12 +732,9 @@ and the counts.
 ### Where the masking stops
 
 The PII filter recognises personal details statistically, from the words
-around them; it keeps no list of the names in the documents. It misses. In
-the browser acceptance on 23.09.2026 (the phone question to `pellwick`) the
-answer was masked and the excerpts carried `{NAME}` — `excerpt_policies`
-in the log line says `pii:NAME` — yet the same first name stood unmasked in
-two excerpts, in one of them a few words from a `{NAME}`. A first name
-without a surname can slip through, in the answer as much as in an excerpt.
+around them; it keeps no list of the names in the documents. It misses: a
+first name without a surname can slip through, in the answer as much as in
+an excerpt ([decisions.md](../../docs/decisions.md#2026-09-23-masking-is-a-filter)).
 
 So the masking lowers the chance that a reader sees a personal detail; it
 does not rule it out. The log cannot show a miss either: it names what was
@@ -845,14 +748,12 @@ prompt with at most 3,000 characters (`MAX_SOURCE_CHARACTERS`); a longer one
 is cut with a note. The longest passage the demo corpus returns whole has
 2,874 characters, so the limit only catches outliers.
 
-`layers` is derived from the citations, not from the model's wording. In
-tests on 17.09.2026 Nemotron did not say when an answer rested on an inbox
-document, and when told to add a fixed sentence, it added it to answers
-without any inbox source too. Citations had one flaw — the model wrote "[3]
-and [4] do not contain pricing information", and both counted as cited —
-which stopped once the prompt forbade commenting on the sources (4 test
-questions, then 10). Citations are still the model's; `layers` is only as
-good as they are.
+`layers` is derived from the citations, not from the model's wording: a
+model asked to say when an answer rested on an inbox document did not do so
+reliably (`docs/decisions.md`, 17.09.2026). The prompt forbids commenting on
+the sources, since a comment such as "[3] and [4] do not contain pricing
+information" counted both as cited.
+Citations are still the model's; `layers` is only as good as they are.
 
 ## Errors
 
@@ -866,18 +767,10 @@ below describe the English one.
 | 401 | No `X-Andur-Key` header, or a key that is not the key of the requested workspace: a wrong key, the key of another workspace, or a workspace that has no key. The last three share one sentence, so the sentence does not tell which workspaces exist (*Getting a key*). No `WWW-Authenticate` in the response: that header names an authentication scheme for `Authorization`, and the key does not travel there. |
 | 402 | A valid key for this workspace with nothing left: its questions are used up, or its window has closed. The sentence says which. Waiting does not help — a new key does. |
 | 405 | Any method other than `POST`. The response carries `Allow: POST`. |
-| 429 | With an `error` sentence: a key on a plan has used its questions for this month or for today (*Plans*); the sentence says which, and the quota comes back with the next day or month. Without one: more requests at once than the function may run (5 in eu-west-1; in eu-central-1 the stack reserves 10, 5 of them for page loads, see *Configuration*). Lambda refuses those before any code runs, so the body is Lambda's own; with the reservation it is `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Five calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
+| 429 | With an `error` sentence: a key on a plan has used its questions for this month or for today (*Plans*); the sentence says which, and the quota comes back with the next day or month. Without one: more requests at once than the function may run (the stack reserves 10, 5 of them for page loads, see *Configuration*). Lambda refuses those before any code runs, so the body is Lambda's own; with the reservation it is `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Ten calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
 | 500 | The function is set up wrong (an environment variable, unreadable keys), the workspace's key could not be read and the function holds none younger than 15 minutes (*Getting a key*), the budget table could not be reached or was throttled (log line `budget-unreadable`, and there a retry may well work), or a bug. The body then only says *The service is not configured.* (*Der Dienst ist nicht eingerichtet.*); the cause is in the log. |
 | 502 | Bedrock failed: throttled or busy twice in a row, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer; or the answer could not be checked for the denied topics, and is not given. The sentence names the cause. When it failed before the model answered, and not by a timeout or an unreadable topic verdict, the question is given back to the key, and the body adds `"refunded": true` and a sentence that says so (*Keys are budgets*). |
 | 503 | This instance has used its 10 reads in 10 seconds for workspaces it holds no key for (*Getting a key*). The response carries `Retry-After: 10`; nothing was read and nothing counted. |
-
-Two more can arrive that the function never saw. Neither body is
-`{"error": ...}`, which is how a client tells them from a refusal:
-
-| Status | When |
-|---|---|
-| 403 | The request was not accepted before the handler ran. Three ways to earn it, all measured 17.09.2026: a call sent **straight to the function URL**, which answers `{"Message": "Forbidden"}` because only CloudFront may invoke it; a call through CloudFront **without `x-amz-content-sha256`**, which comes back as Lambda's `{"message": "The request signature we calculated does not match the signature you provided. ..."}`; or a broken deployment, where CloudFront lacks the permission. None of them is a wrong key — that is a 401 with a sentence. |
-| 504 | The function did not answer within the 120 seconds CloudFront waits, and CloudFront returns an HTML error page of its own. The function itself may run 195 seconds and carries on to the end; the question is counted either way. See *Configuration*. |
 
 The checks run in this order: method, body, workspace, settings, key,
 question, budget. Settings sit in the middle because everything after them
@@ -894,15 +787,8 @@ comes back, so a full one is a 429, with a sentence that Lambda's has not.
 ## Logs
 
 One JSON line per request in the log group `/aws/lambda/andur-answer`, kept
-30 days (these from us-east-1, 23.09.2026; the `answered` line is from before
-the excerpt guardrail, so it has no `excerpt_policies` yet, and the 401 line
-from before its sentence named the workspace):
-
-```json
-{"event": "answered", "status": 200, "workspace": "pellwick", "model": "nvidia.nemotron-super-3-120b", "input_tokens": 1326, "output_tokens": 32, "hits": 5, "dropped": 0, "cited": 2, "guardrail": "none", "guardrail_policies": [], "grounding_score": 0.99, "relevance_score": 1.0, "guardrail_units": {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 5}, "cost_usd": 0.00112, "price_date": "2026-09-23", "latency_ms": 3430}
-{"event": "refused", "status": 401, "workspace": "quillmoor", "error": "The key is not valid.", "latency_ms": 0}
-{"event": "refused", "status": 402, "workspace": "pellwick", "error": "This key's 10 questions are used up; a new key is needed.", "latency_ms": 31}
-```
+30 days: an `answered` line for an answer, a `refused` or `failed` line with
+the status and the `error` sentence otherwise.
 
 The question is never logged, nor the key, nor its hash — with one
 exception: a `crashed` line carries a traceback, and an exception message
@@ -910,8 +796,9 @@ inside it can quote what the code choked on.
 
 What the excerpt guardrail masked is in `excerpt_policies` of the
 `answered` line, by type. A topic the topic check of the answer found is in
-`guardrail_policies`, and its unit in `guardrail_units`; a check that failed
-is a `topic-guard-failed` line with the error class and code. `hits` counts the passages that reached the model,
+`guardrail_policies`; a call of the topic model that failed is a
+`topic-model-failed` line with the error, a topic two more calls lifted a
+`topic-model-unconfirmed` line. `hits` counts the passages that reached the model,
 also for a refused question that returns none of them.
 
 A Bedrock failure adds a `retrieve-failed` or `converse-failed` line with
@@ -941,7 +828,8 @@ aws logs tail /aws/lambda/andur-answer --region eu-central-1 --follow
 ```
 
 `cost_usd` in the `answered` line is the answer's cost at the prices of
-`price_date`: tokens and guardrail units, each times the price per thousand
+`price_date`: tokens of the answer model and the topic model, and guardrail
+units, each times the price per thousand
 the stack hands over. Prices change at AWS without a deploy here, and the
 token and unit counts in the same line do not — so an old line can always be
 priced again. `guardrail_units` is what the trace reported per policy;
@@ -955,9 +843,9 @@ from files.
 | Variable | Set to |
 |---|---|
 | `KNOWLEDGE_BASE_ID` | Taug's knowledge base, imported from `TaugStack`. |
-| `MODEL_ID` | The region's answer model in `REGIONS` (`taug/infra/answer_models.py`): `eu.amazon.nova-pro-v1:0`, Nova Pro through its EU inference profile, in eu-west-1; `qwen.qwen3-235b-a22b-2507-v1:0`, Qwen3 235B in the region itself, in eu-central-1. |
-| `ANSWER_PROMPT` | Optional. The wording of the system prompt (`prompts.PROMPTS`) that `prompt_of` in `svar/infra/answer_prompts.py` gives the answer model: `sentence-first` for Nova Pro in eu-west-1, `each-part` for Qwen3 235B in eu-central-1. Without it, `each-part`. An unknown name is refused. |
-| `REGION` | The stack's region, `eu-west-1` or `eu-central-1`. |
+| `MODEL_ID` | The region's answer model in `REGIONS` (`taug/infra/answer_models.py`): `qwen.qwen3-235b-a22b-2507-v1:0`, Qwen3 235B in the region itself. |
+| `ANSWER_PROMPT` | Optional. The wording of the system prompt (`prompts.PROMPTS`) that `prompt_of` in `svar/infra/answer_prompts.py` gives the answer model: `each-part` for Qwen3 235B. Without it, `each-part`. An unknown name is refused. |
+| `REGION` | The stack's region, `eu-central-1`. |
 | `NUMBER_OF_RESULTS` | Passages per question, `10`. Retrieve may return fewer. |
 | `API_KEY_PARAMETER_PATH` | `/andur/api-keys`. |
 | `BUDGET_TABLE_NAME` | `andur-key-budgets`, the table that counts per key. |
@@ -968,35 +856,31 @@ from files.
 | `GUARDRAIL_VERSION` | Its deployed version, a number. `DRAFT` is refused. |
 | `EXCERPT_GUARDRAIL_ID` | The stack's excerpt guardrail. |
 | `EXCERPT_GUARDRAIL_VERSION` | Its deployed version, a number. |
-| `TOPIC_GUARDRAIL_ID` | The stack's topic guardrail, which checks the question and the answer without its citations. Not set where a topic model checks. |
-| `TOPIC_GUARDRAIL_VERSION` | Its deployed version, a number. |
-| `PAGE_FOLDER` | Only where the function is the address itself, without CloudFront (eu-central-1): `/opt`, where Lambda unpacks the layer with the page's files. Then the function serves the page and sets the security headers itself, and times a second model call by its own 195 seconds instead of CloudFront's 120. |
-| `TOPIC_MODEL_ID` | Instead of the two above, in a region whose stack checks the topics with a model (`REGIONS` in `taug/infra/answer_models.py`): `openai.gpt-oss-120b-1:0` in eu-central-1 since 07.10.2026. |
-| `PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS` | With `TOPIC_MODEL_ID`: USD per 1,000 input tokens of the topic model. |
-| `PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS` | With `TOPIC_MODEL_ID`: USD per 1,000 output tokens. |
+| `PAGE_FOLDER` | `/opt`, where Lambda unpacks the layer with the page's files. The function serves the page from there and sets the security headers itself. Required: without it every request is a 500. |
+| `TOPIC_MODEL_ID` | The model that checks the topics, from `REGIONS` in `taug/infra/answer_models.py`: `openai.gpt-oss-120b-1:0` since 07.10.2026. |
+| `PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the topic model. |
+| `PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens of the topic model. |
 | `PRICE_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the answering model, `0.00029`. |
 | `PRICE_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens, `0.00116`. |
-| `PRICE_TOPIC_PER_1K_UNITS` | USD per 1,000 text units of the topic filter, `0.15`. |
 | `PRICE_PII_PER_1K_UNITS` | USD per 1,000 text units of the sensitive information filter, `0.10`. |
 | `PRICE_GROUNDING_PER_1K_UNITS` | USD per 1,000 text units of the grounding check, `0.10`. |
 | `PRICE_DATE` | The day those prices were read, `2026-10-06`, as `YYYY-MM-DD`. |
 
-The values shown are those of the stack in eu-central-1, the default region,
-with Qwen3 235B; the stack in eu-west-1 gets Nova Pro's from the same table,
-read 28.09.2026. The prices are the standard-tier prices of Amazon Bedrock,
+The values shown are those of the stack in eu-central-1 with Qwen3 235B.
+The prices are the standard-tier prices of Amazon Bedrock,
 read 06.10.2026 from the AWS Price List API, the source of the pricing page;
 the source is in a comment next to them in `taug/infra/answer_models.py`. The token prices come
 from `taug/infra/answer_models.py`, looked up by the model id the stack deploys,
 so a model never goes out with another model's prices, and a model without
-a row there does not synthesise. The guardrail prices are the same as in
-us-east-1. A text unit is up to 1,000 characters of text one policy reads.
+a row there does not synthesise. A text unit is up to 1,000 characters of
+text one policy reads.
 
 There is no variable for the address or the key header: the function reads
 the key from `KEY_HEADER` in `intake.py`, and nothing in it knows what it is
 reached through.
 
-A model that is only offered through an inference profile, such as the
-Claude and Nova models in eu-west-1, is given by its EU profile id
+A model behind the EU inference profile, such as Nova Pro and Claude Sonnet
+4.6 in the table, is given by its EU profile id
 (`eu.…`). The stack then allows `InvokeModel` on that profile, with the
 guardrail condition, and on the model itself in the EU regions (`eu-*`) only
 when the call comes through that profile (`bedrock:InferenceProfileArn`).
@@ -1012,63 +896,46 @@ would pay for the input tokens again. The exception is a call AWS documents
 as not run — throttled over a quota, a service unable to handle it, a model
 not ready (`MODEL_REJECTION_CODES` in `llm.py`; an internal error is not
 among them, the model may have run). The handler makes it once more after 2
-seconds, but only up to second 30 of the request (`latest_model_retry_start()`
+seconds, but only up to second 105 of the request (`latest_model_retry_start()`
 in `aws.py`): the pause, a model call that runs into its 3 + 40 seconds and
 two guardrail calls of 20 after it, the topic check of the answer and the
-excerpts, end by second 115, and the 5 seconds to
-CloudFront's 120 are for the cold start and the way in, which the handler's
+excerpts, end by second 190, and the 5 seconds to
+the function's 195 are for the cold start and the way in, which the handler's
 clock does not see (`ORIGIN_MARGIN_SECONDS`). A retried count can charge one question
 twice, which is the safe direction: the count runs ahead, never behind. The
 budget call waits the shortest of all, since it sits in front of every
 question. The guardrail calls are `bedrock-runtime` calls with limits of
 their own (2 + 5 seconds): under the model's 40 they would push the worst case
-past the function's timeout. Where a topic model checks the topics
-(eu-central-1), a check is at most two rounds of 2 + 8 seconds, one attempt
-each: the first call, then the call in place of a failed one or the two
-that confirm a topic, at once. That is 20 seconds, as long as the guardrail
-call it replaces, so every sum here holds for both ways
-(`topic_check_fits_a_guardrail_call()` in `aws.py`). Added up, the worst case is 189 seconds —
+past the function's timeout. A topic check by gpt-oss-120b is at most two
+rounds of 2 + 8 seconds, one attempt each: the first call, then the call in
+place of a failed one or the two that confirm a topic, at once. That is 20
+seconds, as long as a guardrail call, so every sum here counts it as one
+(`topic_check_fits_a_guardrail_call()` in `aws.py`). Added up without a
+second model call, the worst case is 189 seconds —
 Parameter Store counts once, because the function reads only the requested
 workspace's key and reads it at most once per request, however many
 workspaces there are, and the budget table counts twice, because an item whose own window outlasts it is
 put right with a second write, and a key on a plan is counted with a second
-write after the demo's refused it, and the guardrail three times: the topic
+write after the demo's refused it, and the guardrail calls three times: the topic
 check of the question before the model call, the topic check of the answer
 and the excerpts after it. A request with the second model call ends by
-second 115, so it does not add to the 189; the check of the question lies in
-the 30 seconds before it. The function's timeout is 195 (180 until the check
-of the question, 06.10.2026), so a hanging Bedrock call still ends as a 502
-with a reason, not as a bare timeout.
-
-One layer does not nest, and knowingly so. **CloudFront waits 120 seconds**
-(`ORIGIN_RESPONSE_TIMEOUT_SECONDS` in the stack) against the function's 195.
-That is the whole of what the response-timeout quota allows without an
-approved increase — the quota is 1 to 120 seconds. So an answer that took
-longer than 120 seconds reaches the browser as CloudFront's 504 while the
-function runs it to the end and the question stays counted. The alternative
-would be a function timeout under 120, which would cut off answers that are
-merely slow instead of merely reporting them late. An answer took 0.7 to 3
-seconds in us-east-1 before there were guardrails (18.09.2026), 1.8 to 3.8
-seconds there with both guardrails (four answered questions, 23.09.2026),
-and 0.7 to 4.4 seconds inside the function with Nova Pro on the page in
-eu-west-1 (four questions, 28.09.2026), so this is a corner, not a case.
-
-Without CloudFront (eu-central-1) no layer cuts in at 120: the page waits 200
+second 190, and that is the worst case (`worst_case_seconds()` in `aws.py`).
+No layer between caller and function cuts in sooner: the page waits 200
 seconds (`REQUEST_TIMEOUT_MS` in `svar/web/app.js`), `svar/scripts/ask.py` 200, and the
-function may run 195, so its own timeout is the limit. The second model call
-may start until second 105 there (`latest_model_retry_start(False)` in
-`aws.py`), its answer is back by 190, and the worst case is 190.
+function may run 195, so its own timeout is the limit. That timeout is 195
+(180 until the check of the question, 06.10.2026), so a hanging Bedrock call
+still ends as a 502 with a reason, not as a bare timeout.
 
-At most 5 requests run at the same time (`ANSWER_MAX_CONCURRENCY` in the
-stack); Lambda answers the rest with 429. Where the function serves the page
-itself (eu-central-1), each file of the page is a request as well, so the
-stack reserves 5 more for one page load (`PAGE_LOAD_CONCURRENCY`): 10, of
-which questions may take all. An account that allows only 10 executions in
+`ANSWER_MAX_CONCURRENCY` in the stack is 5, for questions. The function
+serves the page itself, and each file of the page is a
+request as well, so the stack reserves 5 more for one page load
+(`PAGE_LOAD_CONCURRENCY`): 10, of which questions may take all; Lambda
+answers the rest with 429. An account that allows only 10 executions in
 all cannot hold that reservation; there `-c answer_max_concurrency=none`
 leaves it out, and the account's limit, shared with every function of the
 account in the region, is the cap
-([docs/operating.md](../../docs/operating.md#another-region)).
-Five concurrent calls from a stranger (ten in Frankfurt) therefore hold the
+([docs/operating.md](../../docs/operating.md#the-region)).
+Ten concurrent calls from a stranger therefore hold the
 service up for everyone — taken on purpose:
 capping the bill matters more here than keeping a demo reachable, and a WAF in
 front of the URL is the answer if that ever becomes a real problem.
@@ -1076,6 +943,5 @@ front of the URL is the answer if that ever becomes a real problem.
 ## Packaging
 
 The function package is this folder without `README.md` and caches. boto3 is
-not packaged: the `python3.14` runtime brought boto3 and botocore 1.42.97 in
-`eu-west-1` on 28.09.2026 (the cold-start log line), the same as in
-`us-east-1` on 17.09.2026; both know `bedrock-agent-runtime` and `converse`.
+not packaged: the `python3.14` runtime brings boto3 and botocore, and the
+first log line after a cold start names their versions.

@@ -12,11 +12,11 @@ and the table of regions and models with their prices.
 | File | What it does |
 |---|---|
 | [access/](access/__init__.py) | Taug's access library: the key check (`keys.py`), the workspace rules (`workspaces.py`: names, layers, key header, the filter of every search) and what a botocore error says (`aws_errors.py`). It imports nothing from Svar; Svar's answer function packs it. |
-| [infra/stack.py](infra/stack.py) | `TaugStack`: the documents, the vectors, the knowledge base, the key retirer, and the outputs the scripts read. |
+| [infra/stack.py](infra/stack.py) | `TaugStack`: the documents, the vectors, the knowledge base, and the outputs the scripts read. |
 | [infra/knowledge_base.py](infra/knowledge_base.py) | Builds the documents bucket (`workspaces/<workspace>/<layer>/`), the vector store, the knowledge base and its data source. |
 | [infra/answer_models.py](infra/answer_models.py) | The regions a stack may run in, the models each region may use, and their token prices. Model ids and prices live here and nowhere else. |
-| [infra/keys.py](infra/keys.py) | Where the workspace keys live in Parameter Store, and the key retirer, which answered the Delete of the key resources Andur's one stack used to have; in `TaugStack` no resource calls it, it is the stack's first content. |
-| [infra/api_keys/](infra/api_keys/handler.py) | That function's code, a code package of its own. |
+| [infra/keys.py](infra/keys.py) | Where the workspace keys live in Parameter Store. |
+| [infra/api_keys/](infra/api_keys/handler.py) | The code of the key retirer, which no stack builds any more; it waits for the operator's word to be deleted ([docs/status.md](../docs/status.md)). |
 | [infra/shared.py](infra/shared.py) | What the stack modules of both stacks share: the Lambda runtime, how code is packaged, log groups. |
 | [scripts/](scripts/README.md) | `ingest` (check a folder, upload it, sync the knowledge base), `retrieve` (search one workspace), `workspace` (add a workspace's key, put it on a plan, remove a workspace), with `layout` and `aws` underneath. |
 | [docs/metadata.md](docs/metadata.md) | The sidecar file every document carries: workspace, layer, source, licence. |
@@ -50,6 +50,5 @@ python -m taug.scripts.workspace --region eu-central-1 add quillmoor > /dev/null
 ```
 
 All of them call the deployed stacks except `ingest --check`. Without
-`--region` they aim at Frankfurt, the default region; `--region eu-west-1` aims
-at Ireland, whose stack is not carried on ([docs/status.md](../docs/status.md)). Options, output and exit codes:
+`--region` they aim at Frankfurt, the default and only region. Options, output and exit codes:
 [scripts/README.md](scripts/README.md).
