@@ -32,8 +32,11 @@ template anyway.
   2026-11-18 in [decisions.md](decisions.md#2026-11-18-frankfurt-alone)): it
   checks the topics with the topic model alone, always serves the page, and no longer reads
   `PRICE_TOPIC_PER_1K_UNITS`; the page no longer sends `x-amz-content-sha256`. `AndurStack`
-  changes in three places: the function's code key, the page layer's asset, and that one
-  variable gone from the function's environment.
+  changes in two places: the function's code key and the page layer's asset. The variable
+  stays in the environment for this deploy, because the code deployed now refuses to run
+  without it in the seconds before the new code arrives ([Deploy](operating.md#deploy)).
+- After that deploy: take `RETIRED_ENVIRONMENT` (`PRICE_TOPIC_PER_1K_UNITS`) out of
+  `svar/infra/answer_function.py`; the next deploy removes it from the function.
 - `TaugStack` without the key retirer: seven resources go (the function, its provider, their
   roles, policy and two log groups), and its `CDKMetadata` changes. Its handler,
   `taug/infra/api_keys/`, is no longer built; its files and

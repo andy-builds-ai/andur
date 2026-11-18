@@ -227,8 +227,11 @@ Ireland and us-east-1 stays in the entries above and in git. The entries
 above that speak of Ireland, us-east-1, CloudFront or the topic guardrail
 stay as they were written. Built in two steps: the first left both
 templates byte for byte the same; the second changes `AndurStack` in the
-function's code, the page layer and one variable, and `TaugStack` by the
-retirer's seven resources, and waits for a deploy ([status.md](status.md)).
+function's code and the page layer, and `TaugStack` by the retirer's seven
+resources, and waits for a deploy ([status.md](status.md)).
+`PRICE_TOPIC_PER_1K_UNITS` stays in the function's environment for that
+deploy and goes with the one after it: the deployed code refuses to run
+without it while CloudFormation hands it the new environment.
 
 <a name="2026-09-28-account-wide-names-carry-region"></a>
 **2026-09-28 — Names that hold for the whole account carry the region.**
