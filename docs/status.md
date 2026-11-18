@@ -38,9 +38,8 @@ template anyway.
 - After that deploy: take `RETIRED_ENVIRONMENT` (`PRICE_TOPIC_PER_1K_UNITS`) out of
   `svar/infra/answer_function.py`; the next deploy removes it from the function.
 - `TaugStack` without the key retirer: seven resources go (the function, its provider, their
-  roles, policy and two log groups), and its `CDKMetadata` changes. Its handler,
-  `taug/infra/api_keys/`, is no longer built; its files and
-  `taug/tests/test_api_keys_resource.py` wait for the operator's word to be deleted.
+  roles, policy and two log groups), and its `CDKMetadata` changes. Its handler
+  and its test are deleted.
 - `svar/app/__init__.py`: its docstring names `scripts/workspace.py`, now
   `taug/scripts/workspace.py`.
 - `svar/app/plans.py`: its docstring and one comment name `python -m scripts.workspace`, now

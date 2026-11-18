@@ -16,7 +16,6 @@ and the table of regions and models with their prices.
 | [infra/knowledge_base.py](infra/knowledge_base.py) | Builds the documents bucket (`workspaces/<workspace>/<layer>/`), the vector store, the knowledge base and its data source. |
 | [infra/answer_models.py](infra/answer_models.py) | The regions a stack may run in, the models each region may use, and their token prices. Model ids and prices live here and nowhere else. |
 | [infra/keys.py](infra/keys.py) | Where the workspace keys live in Parameter Store. |
-| [infra/api_keys/](infra/api_keys/handler.py) | The code of the key retirer, which no stack builds any more; it waits for the operator's word to be deleted ([docs/status.md](../docs/status.md)). |
 | [infra/shared.py](infra/shared.py) | What the stack modules of both stacks share: the Lambda runtime, how code is packaged, log groups. |
 | [scripts/](scripts/README.md) | `ingest` (check a folder, upload it, sync the knowledge base), `retrieve` (search one workspace), `workspace` (add a workspace's key, put it on a plan, remove a workspace), with `layout` and `aws` underneath. |
 | [docs/metadata.md](docs/metadata.md) | The sidecar file every document carries: workspace, layer, source, licence. |

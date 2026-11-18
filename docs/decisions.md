@@ -207,8 +207,8 @@ had been built there first. On 18.11.2026 the stacks in `eu-west-1` and
 `us-east-1` and everything they left behind (buckets, keys, log groups) were
 deleted; Frankfurt was not touched. The code followed the same day.
 `REGIONS` holds `eu-central-1` alone, and with Ireland's row went what only
-it used: CloudFront and the site bucket (`svar/infra/web.py` is built no
-more), the topic guardrail in the Standard tier and the EU guardrail profile,
+it used: CloudFront and the site bucket (`svar/infra/web.py` is
+deleted), the topic guardrail in the Standard tier and the EU guardrail profile,
 Ireland's price table of 28.09.2026, and the second `cdk synth` in CI. So
 did the Frankfurt fallback through the profile (*`SvarStack` takes its
 settings from its region's table*, 2026-11-17), because the profile carries

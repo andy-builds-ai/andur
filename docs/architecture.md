@@ -129,8 +129,7 @@ docs/               architecture, operating, costs, decisions
 knowledge/          the demo corpus: two fictional companies
 taug/access/        the key check and the workspace rules, packed into Svar's answer function
 taug/infra/         Taug's stack (stack.py), the knowledge base, the regions with their
-                    models and prices, the key path, shared helpers; api_keys/ is
-                    built no more and waits to be deleted (status.md)
+                    models and prices, the key path, shared helpers
 taug/scripts/       ingest, layout, retrieve, workspace, aws
 taug/docs/          retrieval findings, metadata convention
 taug/tests/         access library, ingest, retrieve, workspace

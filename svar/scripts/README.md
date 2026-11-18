@@ -12,7 +12,9 @@ Five commands, all run from the repository root. What the scripts need (install,
 
 Svar runs in `eu-central-1` (Frankfurt) alone. The scripts take `--region`
 and without it aim at `eu-central-1`, the default region in
-`taug/infra/answer_models.py`; a region without a table there is refused.
+`taug/infra/answer_models.py`. `evaluate`, `topic_probe`, `grounding_probe` and
+`control_eval` refuse a region without a table there; `ask` reads only the
+stacks of the region it is given.
 
 ## ask — the proof that answering works
 
@@ -64,7 +66,7 @@ python -m svar.scripts.evaluate --region eu-central-1 --model "Qwen3 235B A22B 2
 ```
 
 It asks the 30 questions in `evaluation-questions.json` — 22 that the
-documents answer, 4 that the guardrail must refuse, 4 that no document
+documents answer, 4 that the topic check must refuse, 4 that no document
 answers — of every model in the table of `--region` (`REGIONS` in
 `taug/infra/answer_models.py`), through `answer_question` in
 `svar/app/answering.py` with the deployed function's own settings. Only the model,
@@ -77,7 +79,7 @@ Only models that run in the region or behind an EU profile are allowed; the
 script refuses any other.
 
 `evaluation-questions-de.json` asks 32 questions in German about the same
-documents — 12 that they answer, 16 that the guardrail must refuse, 4 that
+documents — 12 that they answer, 16 that the topic check must refuse, 4 that
 no document answers. A question with `"language": "de"` is asked the way the
 German page asks it: the prompt and the fixed sentences are German. Its
 facts keep the document's spelling first and add German ones ("60 Minuten",
@@ -91,7 +93,7 @@ plumbing business whose documents are not in the repository, so the
 workspace has to be ingested for it. 20 that the documents answer, each fact
 a number, a date or a word the answer can be checked for ("68 Euro", "30.
 September", "EC-Karte"), spread over all seven documents; 3 that the
-guardrail must refuse; 3 that no document answers. Its facts are German
+topic check must refuse; 3 that no document answers. Its facts are German
 spellings only, since the documents are German. `documents` names the
 document, the part of a section's file name before `--`: four of the ten
 sections of 06.10.2026 still carry names from before umlauts were spelled out
