@@ -14,7 +14,6 @@ from svar.infra.answer_function import (
     ANSWER_MAX_CONCURRENCY,
     PAGE_LAYER_FOLDER,
     PAGE_LOAD_CONCURRENCY,
-    RETIRED_ENVIRONMENT,
 )
 from svar.infra.answer_prompts import (
     DEFAULT_PROMPT,
@@ -181,7 +180,6 @@ def test_frankfurt_tells_the_function_both_models_and_frankfurt_prices(
         *config.TOPIC_MODEL_VARIABLES.values(),
         *config.PAGE_VARIABLES.values(),
         config.ANSWER_PROMPT_VARIABLE,
-        *RETIRED_ENVIRONMENT,
     }
     (drain,) = template.find_resources("Custom::AndurDeployDrain").values()
     assert drain["Properties"]["GuardrailVersions"] == [

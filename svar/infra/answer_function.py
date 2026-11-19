@@ -73,11 +73,6 @@ PACKAGE_EXCLUDES = tuple(pattern.removeprefix("**/") for pattern in ASSET_EXCLUD
 PRICE_INPUT_PER_1K_TOKENS = answer_model(ANSWER_MODEL_ID).input_per_1k
 PRICE_OUTPUT_PER_1K_TOKENS = answer_model(ANSWER_MODEL_ID).output_per_1k
 
-#: The topic guardrail's unit price, which no code reads any more. It stays in the function's
-#: environment for one deploy: CloudFormation gives the old code the new environment some
-#: seconds before the new code, and the old code refuses to run without it
-#: (docs/operating.md, "Deploy"). The deploy after that takes it out.
-RETIRED_ENVIRONMENT = {"PRICE_TOPIC_PER_1K_UNITS": "0.15"}
 PRICE_PII_PER_1K_UNITS = "0.10"
 PRICE_GROUNDING_PER_1K_UNITS = "0.10"
 
@@ -361,7 +356,6 @@ def create_answer_function(
             "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
             "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
             "PRICE_DATE": stack.models.price_date,
-            **RETIRED_ENVIRONMENT,
         },
     )
 

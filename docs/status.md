@@ -8,7 +8,7 @@ The operator updates it with every deploy and every measurement run.
 
 | Region | Stacks | Code | Last deploy | What it is |
 |---|---|---|---|---|
-| `eu-central-1` (Frankfurt) | `TaugStack`, `AndurStack` | `b97596a` | 11.11.2026 | The stack that runs. Taug's seven resources were moved into `TaugStack` that night and both stacks deployed; `cdk diff` against this code then showed no difference in either stack ([decisions.md, 11.11.2026](decisions.md#2026-11-11-move-ran-in-frankfurt)). |
+| `eu-central-1` (Frankfurt) | `TaugStack`, `AndurStack` | `a273938` | 19.11.2026 | The stacks that run, in Frankfurt alone ([decisions.md, 18.11.2026](decisions.md#2026-11-18-frankfurt-alone)). The deploy removed the key retirer from `TaugStack` and brought the answer function and the page layer of `AndurStack` to this code; one question was asked through the address afterwards. |
 
 The code is named by its commit on `main`; later commits that change only documents or tests
 leave the deployed templates as they are. The stacks themselves are described in
@@ -28,26 +28,9 @@ Each of these sits in the answer function's code package or in a template, so ch
 changes what AWS gets. They wait for the next deploy that changes the function or the
 template anyway.
 
-- The answer function for Frankfurt alone (*The code builds Frankfurt alone*,
-  2026-11-18 in [decisions.md](decisions.md#2026-11-18-frankfurt-alone)): it
-  checks the topics with the topic model alone, always serves the page, and no longer reads
-  `PRICE_TOPIC_PER_1K_UNITS`; the page no longer sends `x-amz-content-sha256`. `AndurStack`
-  changes in two places: the function's code key and the page layer's asset. The variable
-  stays in the environment for this deploy, because the code deployed now refuses to run
-  without it in the seconds before the new code arrives ([Deploy](operating.md#deploy)).
-- After that deploy: take `RETIRED_ENVIRONMENT` (`PRICE_TOPIC_PER_1K_UNITS`) out of
-  `svar/infra/answer_function.py`; the next deploy removes it from the function.
-- `TaugStack` without the key retirer: seven resources go (the function, its provider, their
-  roles, policy and two log groups), and its `CDKMetadata` changes. Its handler
-  and its test are deleted.
-- `svar/app/__init__.py`: its docstring names `scripts/workspace.py`, now
-  `taug/scripts/workspace.py`.
-- `svar/app/plans.py`: its docstring and one comment name `python -m scripts.workspace`, now
-  `python -m taug.scripts.workspace`.
-- `svar/app/clocks.py`: the comment on `clock` names the age of a cached key; the key cache
-  reads its own clock in `taug/access/keys.py`.
-- `svar/app/sentences.py`: the comment above `QUESTION_REFUSED_ANSWERS` names
-  `infra/stacks/guardrails.py`, now `svar/infra/guardrails.py`.
+- `svar/infra/answer_function.py` without `RETIRED_ENVIRONMENT`: the answer function's
+  environment loses `PRICE_TOPIC_PER_1K_UNITS`, which no code has read since the deploy of
+  19.11.2026. `AndurStack` changes in one place, the function's environment.
 - Five public definitions in `svar/app/` without a docstring: three in `errors.py`, one each
   in `budget.py` and `plans.py`. `pyproject.toml` exempts `svar/app/` from ruff's docstring
   rules until then; the exemption goes with that deploy.

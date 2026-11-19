@@ -860,7 +860,6 @@ from files.
 | `TOPIC_MODEL_ID` | The model that checks the topics, from `REGIONS` in `taug/infra/answer_models.py`: `openai.gpt-oss-120b-1:0` since 07.10.2026. |
 | `PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the topic model. |
 | `PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens of the topic model. |
-| `PRICE_TOPIC_PER_1K_UNITS` | Set for one more deploy and read by nothing; it goes with the deploy after (docs/status.md). |
 | `PRICE_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the answering model, `0.00029`. |
 | `PRICE_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens, `0.00116`. |
 | `PRICE_PII_PER_1K_UNITS` | USD per 1,000 text units of the sensitive information filter, `0.10`. |

@@ -47,7 +47,6 @@ from svar.infra.answer_function import (
     PRICE_INPUT_PER_1K_TOKENS,
     PRICE_OUTPUT_PER_1K_TOKENS,
     PRICE_PII_PER_1K_UNITS,
-    RETIRED_ENVIRONMENT,
     WEB_FOLDER,
 )
 from svar.infra.guardrails import (
@@ -688,34 +687,13 @@ def test_answer_function_is_configured_only_through_its_environment(
         "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
         "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
         "PRICE_DATE": FRANKFURT_PRICE_DATE,
-        "PRICE_TOPIC_PER_1K_UNITS": "0.15",
     }
     assert set(variables) == {
         *config.ENVIRONMENT_VARIABLES.values(),
         *config.TOPIC_MODEL_VARIABLES.values(),
         *config.PAGE_VARIABLES.values(),
         config.ANSWER_PROMPT_VARIABLE,
-        *RETIRED_ENVIRONMENT,
     }
-
-
-def test_a_retired_variable_stays_for_the_code_still_deployed_and_the_new_code_ignores_it(
-    stack: SvarStack, template: Template
-) -> None:
-    """The deployed code refuses to run without PRICE_TOPIC_PER_1K_UNITS, and CloudFormation
-    gives it the new environment seconds before the new code (docs/operating.md, "Deploy"):
-    the variable stays for one deploy. The new code reads no such variable."""
-    variables = resource_of(stack, template, stack.answer_function)["Properties"]["Environment"][
-        "Variables"
-    ]
-    assert RETIRED_ENVIRONMENT == {"PRICE_TOPIC_PER_1K_UNITS": "0.15"}
-    assert RETIRED_ENVIRONMENT.items() <= variables.items()
-    readable = {
-        *config.ENVIRONMENT_VARIABLES.values(),
-        *config.TOPIC_MODEL_VARIABLES.values(),
-        *config.PAGE_VARIABLES.values(),
-    }
-    assert not set(RETIRED_ENVIRONMENT) & readable
 
 
 def test_the_model_id_is_configuration_not_handler_code() -> None:
