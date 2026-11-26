@@ -28,6 +28,16 @@ def fake_tools(monkeypatch: pytest.MonkeyPatch, failing: str = "") -> list[list[
     return ran
 
 
+def test_git_lists_renames_apart_and_paths_unquoted(monkeypatch: pytest.MonkeyPatch) -> None:
+    ran = fake_tools(monkeypatch)
+    verify.changed_files("main")
+    diffs = [command for command in ran if "diff" in command]
+    assert len(ran) == 3
+    assert len(diffs) == 2
+    assert all("--no-renames" in command for command in diffs)
+    assert all(command[:3] == ["git", "-c", "core.quotepath=off"] for command in ran)
+
+
 def test_documents_alone_need_no_synth() -> None:
     assert names(["README.md", "docs/x.md"]) == THREE
 

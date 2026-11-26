@@ -44,8 +44,8 @@ pytest -q
 ```
 
 `python -m scripts.verify` picks these by what changed against `main`, adds
-`cdk synth` when `infra/` or a code package changed, and fails when such a
-change is missing from `docs/status.md`.
+`cdk synth` when `infra/` or a code package changed, and fails when a code
+package changed without a line in `docs/status.md`.
 
 ## The stacks
 

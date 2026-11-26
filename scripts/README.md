@@ -1,6 +1,6 @@
-# scripts — the rehearsal of a new workspace across Andur's parts
+# scripts — the rehearsal and the checks before a commit
 
-One command, run from the repository root. What the scripts need (install, AWS login, the deployed stacks): [taug/scripts/README.md](../taug/scripts/README.md#what-they-need).
+Two commands, run from the repository root. What the scripts need (install, AWS login, the deployed stacks): [taug/scripts/README.md](../taug/scripts/README.md#what-they-need).
 
 | Command | Does |
 |---|---|

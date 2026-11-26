@@ -33,10 +33,14 @@ class Check:
 
 def changed_files(base: str = "main") -> list[str]:
     """The files changed against ``base``, committed or not, and the untracked ones."""
+    # Unquoted paths, so one with a special character still matches its folder; no rename
+    # detection, so a file moved out of a folder is listed under its old path too.
+    git = ["git", "-c", "core.quotepath=off"]
+    diff = [*git, "diff", "--name-only", "--no-renames"]
     commands = (
-        ["git", "diff", "--name-only", f"{base}...HEAD"],
-        ["git", "diff", "--name-only", "HEAD"],
-        ["git", "ls-files", "--others", "--exclude-standard"],
+        [*diff, f"{base}...HEAD"],
+        [*diff, "HEAD"],
+        [*git, "ls-files", "--others", "--exclude-standard"],
     )
     found: set[str] = set()
     for command in commands:
