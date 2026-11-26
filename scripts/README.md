@@ -5,6 +5,16 @@ One command, run from the repository root. What the scripts need (install, AWS l
 | Command | Does |
 |---|---|
 | `python -m scripts.rehearsal` | Sets up a new workspace on the deployed stacks with the same commands as any other, runs the measurements against it, and times every step. |
+| `python -m scripts.verify` | Picks the checks of AGENTS.md by what changed against main and runs them; calls no AWS. |
+
+## verify
+
+```bash
+python -m scripts.verify [--base REF] [--list]
+```
+
+`--base` names the ref to compare with, `main` by default; uncommitted and
+untracked files count too. `--list` names the checks and runs none of them.
 
 ## rehearsal — a new workspace, set up and measured, step by step
 

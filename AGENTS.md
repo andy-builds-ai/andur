@@ -43,6 +43,10 @@ ruff format --check
 pytest -q
 ```
 
+`python -m scripts.verify` picks these by what changed against `main`, adds
+`cdk synth` when `infra/` or a code package changed, and fails when such a
+change is missing from `docs/status.md`.
+
 ## The stacks
 
 ```bash
